@@ -6,7 +6,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=64
 #SBATCH --mem=128G
-#SBATCH --partition=gpu
+#SBATCH --partition=medium
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=wsobolew@ucsc.edu
 

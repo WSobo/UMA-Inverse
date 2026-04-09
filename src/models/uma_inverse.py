@@ -123,6 +123,7 @@ class UMAInverse(nn.Module):
         z: Tensor,
         sequence: Optional[Tensor],
         residue_mask: Tensor,
+        decoding_order: Optional[Tensor] = None,
     ) -> Tensor:
         batch_size, residue_count = residue_mask.shape
         if sequence is None:
@@ -138,17 +139,21 @@ class UMAInverse(nn.Module):
         score = self.ar_pair_to_scalar(rr).squeeze(-1)
         score = score / math.sqrt(float(self.pair_dim))
 
-        causal = torch.tril(
-            torch.ones((residue_count, residue_count), device=z.device, dtype=torch.bool),
-            diagonal=-1,
-        )
-        valid = causal.unsqueeze(0)
-        valid = valid & residue_mask[:, :, None].bool() & residue_mask[:, None, :].bool()
+        if decoding_order is None:
+            decoding_order = torch.arange(residue_count, device=z.device).unsqueeze(0).expand(batch_size, -1)
+
+        decoding_order_i = decoding_order.unsqueeze(2)  # [B, L, 1]
+        decoding_order_j = decoding_order.unsqueeze(1)  # [B, 1, L]
+        causal = decoding_order_i > decoding_order_j    # True if j was decoded before i
+
+        valid = causal & residue_mask[:, :, None].bool() & residue_mask[:, None, :].bool()
 
         score = score.masked_fill(~valid, -1e4)
         probs = torch.softmax(score, dim=-1)
         probs = probs * valid.to(dtype=probs.dtype)
-        probs = probs / probs.sum(dim=-1, keepdim=True).clamp_min(1e-8)
+        # Avoid division by zero for the first decoded residue
+        denominator = probs.sum(dim=-1, keepdim=True)
+        probs = torch.where(denominator > 0, probs / denominator, torch.zeros_like(probs))
 
         return torch.einsum("bij,bjc->bic", probs, token_emb)
 
@@ -180,6 +185,7 @@ class UMAInverse(nn.Module):
             z=z,
             sequence=batch.get("sequence"),
             residue_mask=residue_mask,
+            decoding_order=batch.get("decoding_order"),
         )
 
         decoder_input = torch.cat(
