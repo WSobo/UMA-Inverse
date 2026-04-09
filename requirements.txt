@@ -1,0 +1,15 @@
+# Core DL stack
+torch>=2.2
+pytorch-lightning>=2.2
+numpy>=1.24
+
+# Config + CLI
+hydra-core>=1.3
+omegaconf>=2.3
+
+# Parsing and metrics
+prody>=2.4
+biopython>=1.83
+
+# Dev/test
+pytest>=8.0

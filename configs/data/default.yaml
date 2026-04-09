@@ -1,0 +1,6 @@
+batch_size: 1
+num_workers: 2
+pin_memory: true
+ligand_context_atoms: 25
+cutoff_for_score: 8.0
+max_total_nodes: 384

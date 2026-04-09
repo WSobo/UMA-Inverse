@@ -1,3 +1,33 @@
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Virtual envs
+.venv/
+venv/
+
+# Runtime outputs
+checkpoints/
+outputs/
+wandb/
+lightning_logs/
+*.ckpt
+
+# Data folders (keep placeholders only)
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+logs/SLURM_out/*
+!logs/SLURM_out/.gitkeep
+logs/SLURM_err/*
+!logs/SLURM_err/.gitkeep
+
+#reference repos for agent
 LigandMPNN/
 Struct2Seq-GNN/
 UMA-Fold/
