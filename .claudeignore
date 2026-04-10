@@ -1,0 +1,36 @@
+# ── Reference repos (read-only context — never modify) ───────────────────────
+LigandMPNN/
+Struct2Seq-GNN/
+UMA-Fold/
+
+# ── Virtual environment ───────────────────────────────────────────────────────
+.venv/
+
+# ── Dependency lock (large, rarely needed by Claude) ─────────────────────────
+uv.lock
+
+# ── Data & runtime outputs ────────────────────────────────────────────────────
+data/raw/
+data/processed/
+checkpoints/
+outputs/
+logs/SLURM_out/
+logs/SLURM_err/
+logs/wandb/
+wandb/
+lightning_logs/
+
+# ── Build artifacts ───────────────────────────────────────────────────────────
+*.egg-info/
+__pycache__/
+*.pyc
+*.pyo
+*.so
+dist/
+
+# ── Notebooks (empty) ─────────────────────────────────────────────────────────
+notebooks/
+
+# ── IDE ───────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/

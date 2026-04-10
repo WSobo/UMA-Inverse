@@ -87,6 +87,15 @@ class UMAInverse(nn.Module):
             gradient_checkpointing=bool(config.get("gradient_checkpointing", True)),
         )
 
+        # Pair-to-node readout: feed encoder's geometric knowledge back to residue nodes.
+        # After the encoder refines z, this projects the mean-pooled pair rows back into
+        # node space so the decoder sees updated structural context (not just raw embeddings).
+        self.node_readout = nn.Linear(pair_dim, node_dim)
+
+        # Separate residue-protein and residue-ligand contexts for the decoder.
+        # Avoids ligand signal being diluted (ligand atoms are ~8% of a typical mean pool).
+        self.ctx_proj = nn.Linear(2 * pair_dim, pair_dim)
+
         self.ar_pair_to_scalar = nn.Linear(pair_dim, 1, bias=False)
         self.token_embedding = nn.Embedding(21, node_dim)
 
@@ -111,12 +120,22 @@ class UMAInverse(nn.Module):
         return z * pair_mask.unsqueeze(-1).to(dtype=z.dtype)
 
     def _ligand_aware_context(self, z: Tensor, pair_mask: Tensor, residue_count: int) -> Tensor:
-        # Aggregate residue-to-all-nodes pair signal (protein + ligand).
-        z_res = z[:, :residue_count, :, :]
-        weights = pair_mask[:, :residue_count, :].to(dtype=z.dtype)
-        summed = (z_res * weights.unsqueeze(-1)).sum(dim=2)
-        norm = weights.sum(dim=2, keepdim=True).clamp_min(1.0)
-        return summed / norm
+        # Residue-protein context: how each residue relates to the rest of the chain.
+        rr = z[:, :residue_count, :residue_count, :]
+        rr_w = pair_mask[:, :residue_count, :residue_count].to(dtype=z.dtype)
+        rr_ctx = (rr * rr_w.unsqueeze(-1)).sum(dim=2) / rr_w.sum(dim=2, keepdim=True).clamp_min(1.0)
+
+        # Residue-ligand context: how each residue specifically relates to ligand atoms.
+        # Kept separate so binding-site residues get a distinct, undiluted ligand signal.
+        n_total = z.shape[2]
+        if n_total > residue_count:
+            rl = z[:, :residue_count, residue_count:, :]
+            rl_w = pair_mask[:, :residue_count, residue_count:].to(dtype=z.dtype)
+            rl_ctx = (rl * rl_w.unsqueeze(-1)).sum(dim=2) / rl_w.sum(dim=2, keepdim=True).clamp_min(1.0)
+        else:
+            rl_ctx = torch.zeros_like(rr_ctx)
+
+        return self.ctx_proj(torch.cat([rr_ctx, rl_ctx], dim=-1))
 
     def _autoregressive_context(
         self,
@@ -180,6 +199,12 @@ class UMAInverse(nn.Module):
         z = self._init_pair(node_repr=node_repr, coords=coords, pair_mask=pair_mask)
         z = self.encoder(z, pair_mask.to(dtype=z.dtype))
 
+        # Pair-to-node readout: mean-pool encoder pair rows → residue node updates.
+        # This lets 6 blocks of geometric reasoning inform the per-residue representation
+        # rather than being compressed entirely into the ligand context below.
+        z_pooled = z[:, :residue_count, :, :].mean(dim=2)      # [B, L, pair_dim]
+        node_repr_res = node_repr[:, :residue_count, :] + self.node_readout(z_pooled)
+
         ligand_context = self._ligand_aware_context(z, pair_mask, residue_count=residue_count)
         ar_context = self._autoregressive_context(
             z=z,
@@ -189,7 +214,7 @@ class UMAInverse(nn.Module):
         )
 
         decoder_input = torch.cat(
-            [node_repr[:, :residue_count, :] + ar_context, ligand_context],
+            [node_repr_res + ar_context, ligand_context],
             dim=-1,
         )
         logits = self.decoder(decoder_input)

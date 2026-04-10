@@ -16,7 +16,7 @@ This document is the implementation contract for UMA-Inverse: a LigandMPNN-compa
 
 ## 2) Repository layout
 
-Follow UMA-Fold style:
+Follow UMA-Inverse style:
 
 - `configs/`: config surface for model, data, trainer.
 - `scripts/`: train, inference, pilot-run, SLURM wrappers.

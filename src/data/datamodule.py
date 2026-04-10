@@ -1,3 +1,11 @@
+"""PyTorch Lightning DataModule for UMA-Inverse.
+
+Wraps UMAInverseDataset (PDB → featurised tensors) with proper error handling:
+- Recursion depth guard when samples fail to load (avoids infinite retry loops)
+- Failed PDB IDs are logged to ``logs/failed_pdbs.txt`` for post-hoc audit
+- Specific exception handling instead of bare ``except Exception``
+"""
+import logging
 import os
 import random
 from typing import Dict, List, Optional
@@ -6,7 +14,23 @@ import pytorch_lightning as pl
 import torch
 from torch.utils.data import DataLoader, Dataset
 
+from src import PROJECT_ROOT
 from .ligandmpnn_bridge import load_example_from_pdb, load_json_ids, resolve_pdb_path
+
+logger = logging.getLogger(__name__)
+
+_FAILED_PDB_LOG = os.path.join(PROJECT_ROOT, "logs", "failed_pdbs.txt")
+_MAX_RETRY_DEPTH = 5   # max recursive fallback attempts per sample
+
+
+def _log_failed_pdb(pdb_id: str, reason: str) -> None:
+    """Append a failed PDB ID + reason to the failure log."""
+    try:
+        os.makedirs(os.path.dirname(_FAILED_PDB_LOG), exist_ok=True)
+        with open(_FAILED_PDB_LOG, "a") as f:
+            f.write(f"{pdb_id}\t{reason}\n")
+    except OSError:
+        pass  # never crash the training loop over logging
 
 
 class UMAInverseDataset(Dataset):
@@ -14,39 +38,62 @@ class UMAInverseDataset(Dataset):
         self,
         json_path: str,
         pdb_dir: str,
+        processed_dir: str,
         ligand_context_atoms: int,
         cutoff_for_score: float,
         max_total_nodes: int,
     ) -> None:
         self.pdb_dir = pdb_dir
+        self.processed_dir = processed_dir
         self.ligand_context_atoms = ligand_context_atoms
         self.cutoff_for_score = cutoff_for_score
         self.max_total_nodes = max_total_nodes
 
         ids = load_json_ids(json_path)
-        self.pdb_ids = [pdb_id for pdb_id in ids if resolve_pdb_path(pdb_dir, pdb_id) is not None]
+        self.pdb_ids = [
+            pdb_id for pdb_id in ids
+            if (
+                os.path.exists(os.path.join(processed_dir, f"{pdb_id}.pt"))
+                or resolve_pdb_path(pdb_dir, pdb_id) is not None
+            )
+        ]
 
         if not self.pdb_ids:
-            raise RuntimeError(f"No valid pdb entries found for {json_path} in {pdb_dir}")
+            raise RuntimeError(
+                f"No valid PDB entries found for {json_path}. "
+                f"Check pdb_dir={pdb_dir} and processed_dir={processed_dir}."
+            )
+        logger.info("Dataset loaded: %d structures from %s", len(self.pdb_ids), json_path)
 
     def __len__(self) -> int:
         return len(self.pdb_ids)
 
-    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+    def __getitem__(self, idx: int, _depth: int = 0) -> Dict[str, torch.Tensor]:
+        if _depth >= _MAX_RETRY_DEPTH:
+            raise RuntimeError(
+                f"UMAInverseDataset: exceeded {_MAX_RETRY_DEPTH} retries — "
+                "too many consecutive bad samples. Check your data."
+            )
+
         pdb_id = self.pdb_ids[idx]
-        
-        # Check if preprocessed .pt file exists (cached via scripts/preprocess.py)
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        processed_path = os.path.join(project_root, "data", "processed", f"{pdb_id}.pt")
-        
+
+        # Fast path: load pre-computed cached tensor
+        processed_path = os.path.join(self.processed_dir, f"{pdb_id}.pt")
         if os.path.exists(processed_path):
-            item = torch.load(processed_path, map_location="cpu", weights_only=True)
-            item["pdb_id"] = pdb_id
-            return item
-            
+            try:
+                item = torch.load(processed_path, map_location="cpu", weights_only=True)
+                item["pdb_id"] = pdb_id
+                return item
+            except (RuntimeError, EOFError, OSError) as e:
+                logger.warning("Corrupted cache for %s (%s) — falling back to PDB", pdb_id, e)
+                _log_failed_pdb(pdb_id, f"cache_corrupt:{e}")
+
+        # Slow path: parse PDB on the fly
         pdb_path = resolve_pdb_path(self.pdb_dir, pdb_id)
         if pdb_path is None:
-            return self[random.randrange(len(self.pdb_ids))]
+            logger.debug("PDB not found for %s — sampling replacement", pdb_id)
+            _log_failed_pdb(pdb_id, "pdb_not_found")
+            return self.__getitem__(random.randrange(len(self.pdb_ids)), _depth + 1)
 
         try:
             item = load_example_from_pdb(
@@ -55,55 +102,59 @@ class UMAInverseDataset(Dataset):
                 cutoff_for_score=self.cutoff_for_score,
                 max_total_nodes=self.max_total_nodes,
             )
-        except Exception:
-            return self[random.randrange(len(self.pdb_ids))]
+        except (ValueError, OSError, RuntimeError) as e:
+            logger.warning("Failed to featurize %s (%s) — sampling replacement", pdb_id, e)
+            _log_failed_pdb(pdb_id, f"featurize_error:{type(e).__name__}:{e}")
+            return self.__getitem__(random.randrange(len(self.pdb_ids)), _depth + 1)
 
         item["pdb_id"] = pdb_id
         return item
 
 
-def _pad_2d(items: List[torch.Tensor], max_len: int, feat_dim: int, dtype: torch.dtype) -> torch.Tensor:
+# ── Collation helpers ─────────────────────────────────────────────────────────
+
+def _pad_2d(
+    items: List[torch.Tensor], max_len: int, feat_dim: int, dtype: torch.dtype
+) -> torch.Tensor:
     out = torch.zeros((len(items), max_len, feat_dim), dtype=dtype)
-    for i, tensor in enumerate(items):
-        if tensor.shape[0] > 0:
-            out[i, : tensor.shape[0], :] = tensor
+    for i, t in enumerate(items):
+        if t.shape[0] > 0:
+            out[i, : t.shape[0], :] = t
     return out
 
 
-def _pad_1d(items: List[torch.Tensor], max_len: int, dtype: torch.dtype, fill_value: int = 0) -> torch.Tensor:
+def _pad_1d(
+    items: List[torch.Tensor],
+    max_len: int,
+    dtype: torch.dtype,
+    fill_value: int = 0,
+) -> torch.Tensor:
     out = torch.full((len(items), max_len), fill_value=fill_value, dtype=dtype)
-    for i, tensor in enumerate(items):
-        if tensor.shape[0] > 0:
-            out[i, : tensor.shape[0]] = tensor
+    for i, t in enumerate(items):
+        if t.shape[0] > 0:
+            out[i, : t.shape[0]] = t
     return out
 
 
 def collate_batch(batch: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
+    """Pad a list of variable-length samples into a single batch dict."""
     max_res = max(item["residue_coords"].shape[0] for item in batch)
     max_lig = max(item["ligand_coords"].shape[0] for item in batch)
 
-    residue_coords = _pad_2d([item["residue_coords"] for item in batch], max_res, 3, torch.float32)
-    residue_features = _pad_2d([item["residue_features"] for item in batch], max_res, 6, torch.float32)
-    residue_mask = _pad_1d([item["residue_mask"].to(torch.bool) for item in batch], max_res, torch.bool)
-    sequence = _pad_1d([item["sequence"].to(torch.long) for item in batch], max_res, torch.long, fill_value=20)
-    design_mask = _pad_1d([item["design_mask"].to(torch.bool) for item in batch], max_res, torch.bool)
-
-    ligand_coords = _pad_2d([item["ligand_coords"] for item in batch], max_lig, 3, torch.float32)
-    ligand_features = _pad_2d([item["ligand_features"] for item in batch], max_lig, 6, torch.float32)
-    ligand_mask = _pad_1d([item["ligand_mask"].to(torch.bool) for item in batch], max_lig, torch.bool)
-
     return {
-        "residue_coords": residue_coords,
-        "residue_features": residue_features,
-        "residue_mask": residue_mask,
-        "sequence": sequence,
-        "design_mask": design_mask,
-        "ligand_coords": ligand_coords,
-        "ligand_features": ligand_features,
-        "ligand_mask": ligand_mask,
-        "pdb_id": [item["pdb_id"] for item in batch],
+        "residue_coords":   _pad_2d([b["residue_coords"]   for b in batch], max_res, 3, torch.float32),
+        "residue_features": _pad_2d([b["residue_features"] for b in batch], max_res, 6, torch.float32),
+        "residue_mask":     _pad_1d([b["residue_mask"].to(torch.bool)  for b in batch], max_res, torch.bool),
+        "sequence":         _pad_1d([b["sequence"].to(torch.long)      for b in batch], max_res, torch.long, fill_value=20),
+        "design_mask":      _pad_1d([b["design_mask"].to(torch.bool)   for b in batch], max_res, torch.bool),
+        "ligand_coords":    _pad_2d([b["ligand_coords"]    for b in batch], max_lig, 3, torch.float32),
+        "ligand_features":  _pad_2d([b["ligand_features"]  for b in batch], max_lig, 6, torch.float32),
+        "ligand_mask":      _pad_1d([b["ligand_mask"].to(torch.bool)   for b in batch], max_lig, torch.bool),
+        "pdb_id":           [b["pdb_id"] for b in batch],
     }
 
+
+# ── DataModule ────────────────────────────────────────────────────────────────
 
 class UMAInverseDataModule(pl.LightningDataModule):
     def __init__(
@@ -117,6 +168,7 @@ class UMAInverseDataModule(pl.LightningDataModule):
         ligand_context_atoms: int = 25,
         cutoff_for_score: float = 8.0,
         max_total_nodes: int = 384,
+        processed_dir: Optional[str] = None,
     ) -> None:
         super().__init__()
         self.train_json = train_json
@@ -128,30 +180,29 @@ class UMAInverseDataModule(pl.LightningDataModule):
         self.ligand_context_atoms = ligand_context_atoms
         self.cutoff_for_score = cutoff_for_score
         self.max_total_nodes = max_total_nodes
+        self.processed_dir = processed_dir or os.path.join(PROJECT_ROOT, "data", "processed")
 
         self.train_dataset: Optional[UMAInverseDataset] = None
         self.valid_dataset: Optional[UMAInverseDataset] = None
 
+    def _make_dataset(self, json_path: str) -> UMAInverseDataset:
+        return UMAInverseDataset(
+            json_path=json_path,
+            pdb_dir=self.pdb_dir,
+            processed_dir=self.processed_dir,
+            ligand_context_atoms=self.ligand_context_atoms,
+            cutoff_for_score=self.cutoff_for_score,
+            max_total_nodes=self.max_total_nodes,
+        )
+
     def setup(self, stage: Optional[str] = None) -> None:
         if stage in (None, "fit"):
-            self.train_dataset = UMAInverseDataset(
-                json_path=self.train_json,
-                pdb_dir=self.pdb_dir,
-                ligand_context_atoms=self.ligand_context_atoms,
-                cutoff_for_score=self.cutoff_for_score,
-                max_total_nodes=self.max_total_nodes,
-            )
-            self.valid_dataset = UMAInverseDataset(
-                json_path=self.valid_json,
-                pdb_dir=self.pdb_dir,
-                ligand_context_atoms=self.ligand_context_atoms,
-                cutoff_for_score=self.cutoff_for_score,
-                max_total_nodes=self.max_total_nodes,
-            )
+            self.train_dataset = self._make_dataset(self.train_json)
+            self.valid_dataset = self._make_dataset(self.valid_json)
 
     def train_dataloader(self) -> DataLoader:
         if self.train_dataset is None:
-            raise RuntimeError("DataModule.setup() must be called before requesting train_dataloader().")
+            raise RuntimeError("DataModule.setup() must be called before train_dataloader().")
         return DataLoader(
             self.train_dataset,
             batch_size=self.batch_size,
@@ -163,7 +214,7 @@ class UMAInverseDataModule(pl.LightningDataModule):
 
     def val_dataloader(self) -> DataLoader:
         if self.valid_dataset is None:
-            raise RuntimeError("DataModule.setup() must be called before requesting val_dataloader().")
+            raise RuntimeError("DataModule.setup() must be called before val_dataloader().")
         return DataLoader(
             self.valid_dataset,
             batch_size=self.batch_size,

@@ -11,15 +11,12 @@
 #SBATCH --mail-user=wsobolew@ucsc.edu
 
 set -e
-eval "$(micromamba shell hook --shell bash)"
-micromamba activate uma-fold
-
 cd /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse
 
 echo "Running on hosts: $SLURM_NODELIST"
 echo "Timestamp: $(date)"
 
 echo "Scraping specific JSON IDs from LigandMPNN and downloading flat files safely..."
-python scripts/download_json_pdbs.py
+uv run python scripts/download_json_pdbs.py
 
-echo "✅ Targeted JSON download complete at: $(date)"
+echo "Targeted JSON download complete at: $(date)"

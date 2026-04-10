@@ -12,16 +12,11 @@
 #SBATCH --mail-user=wsobolew@ucsc.edu
 
 set -e
-eval "$(micromamba shell hook --shell bash)"
-micromamba activate uma-fold
-
 cd /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse
-
-python -c "import torch; torch.set_float32_matmul_precision('high');"
 
 echo "Running Fast UMA-Inverse Inference..."
 # Update the paths below according to your exact needs!
-python scripts/inference.py \
+uv run python scripts/inference.py \
     --pdb ../LigandMPNN/inputs/1BC8.pdb \
     --config configs/config.yaml \
     --ckpt checkpoints/last.ckpt

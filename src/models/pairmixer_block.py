@@ -16,6 +16,7 @@ Reference: "Triangle Multiplication is All You Need for Biomolecular
 
 import torch
 import torch.nn.functional as F
+from einops import rearrange
 from torch import Tensor, nn
 
 
@@ -82,13 +83,11 @@ class TriangleMultiplicationOutgoing(nn.Module):
             right = right * m
 
         # Outgoing: z_ij = Σ_k left_ik · right_jk
-        #   left  [B, N, N, H] → permute → [B, H, i, k]
-        #   right [B, N, N, H] → permute → [B, H, k, j]  (transpose last two)
-        left_p = left.permute(0, 3, 1, 2)    # [B, H, i, k]
-        right_p = right.permute(0, 3, 2, 1)  # [B, H, k, j]
+        left_p  = rearrange(left,  'b i k h -> b h i k')
+        right_p = rearrange(right, 'b j k h -> b h k j')
 
         z_out = left_p @ right_p                              # [B, H, i, j]
-        z_out = z_out.permute(0, 2, 3, 1).contiguous()       # [B, i, j, H]
+        z_out = rearrange(z_out, 'b h i j -> b i j h')
         z_out = self.norm_out(z_out)
 
         return self.linear_out(z_out) * torch.sigmoid(self.gate_out(z_norm))
@@ -130,13 +129,11 @@ class TriangleMultiplicationIncoming(nn.Module):
             right = right * m
 
         # Incoming: z_ij = Σ_k left_ki · right_kj
-        #   left  [B, N, N, H] → permute → [B, H, i, k]  (swap N dims: k=dim1, i=dim2)
-        #   right [B, N, N, H] → permute → [B, H, k, j]
-        left_p = left.permute(0, 3, 2, 1)    # [B, H, i, k]
-        right_p = right.permute(0, 3, 1, 2)  # [B, H, k, j]
+        left_p  = rearrange(left,  'b k i h -> b h i k')
+        right_p = rearrange(right, 'b k j h -> b h k j')
 
         z_out = left_p @ right_p                              # [B, H, i, j]
-        z_out = z_out.permute(0, 2, 3, 1).contiguous()       # [B, i, j, H]
+        z_out = rearrange(z_out, 'b h i j -> b i j h')
         z_out = self.norm_out(z_out)
 
         return self.linear_out(z_out) * torch.sigmoid(self.gate_out(z_norm))

@@ -1,22 +1,19 @@
 # ==============================================================================
-# UMA-Fold Makefile
+# UMA-Inverse Makefile
 # ==============================================================================
 # All GPU commands run through SLURM srun or sbatch automatically.
 # Never run `python script.py` directly — this is an HPC cluster.
+# Environment: uv (see pyproject.toml). All Python runs via `uv run python`.
 #
 # Usage:
 #   make help         → list all targets
 #   make pilot        → run 1-batch sanity check on GPU
 #   make train        → submit full curriculum training job
 #   make download     → submit dataset download job
-#   make inference    → run inference on examples/target.yaml
+#   make inference    → run inference on a PDB (set PDB=path/to/file.pdb)
 #   make test         → run pytest suite (CPU, no GPU needed)
 #   make lint         → run ruff linter
 # ==============================================================================
-
-# ── Environment ────────────────────────────────────────────────────────────────
-ENV_NAME    := uma-fold
-MM_ACTIVATE := eval "$$(micromamba shell hook --shell bash)" && micromamba activate $(ENV_NAME)
 
 # ── SLURM: Interactive GPU allocation (for srun one-off commands) ──────────────
 SRUN_GPU := srun \
@@ -36,7 +33,6 @@ SRUN_CPU := srun \
 # ── Project paths ──────────────────────────────────────────────────────────────
 CONFIG      := configs/config.yaml
 CKPT        := checkpoints/last.ckpt
-INFER_YAML  := boltz/examples/multimer.yaml
 
 
 # ==============================================================================
@@ -45,18 +41,23 @@ INFER_YAML  := boltz/examples/multimer.yaml
 .PHONY: help
 help:
 	@echo ""
-	@echo "  UMA-Fold Makefile"
+	@echo "  UMA-Inverse Makefile"
 	@echo "  ─────────────────────────────────────────────────────────"
 	@echo "  make download       Submit SLURM dataset download job"
+	@echo "  make preprocess     Submit SLURM preprocessing job"
 	@echo "  make pilot          Run 1-batch sanity check on GPU (srun)"
 	@echo "  make pilot-64       Pilot with max_total_nodes=64"
 	@echo "  make pilot-128      Pilot with max_total_nodes=128"
 	@echo "  make pilot-384      Pilot with max_total_nodes=384"
+	@echo "  make pilot-all      Run all pilot stages via sbatch"
 	@echo "  make train          Submit full curriculum training (sbatch)"
 	@echo "  make inference      Run inference — set PDB=path/to/file.pdb (srun)"
 	@echo "  make test           Run pytest suite (srun, CPU)"
+	@echo "  make test-fast      Run pytest, stop on first failure (srun, CPU)"
 	@echo "  make lint           Run ruff linter (srun, CPU)"
-	@echo "  make env-check      Verify micromamba env + torch/CUDA (srun GPU)"
+	@echo "  make lint-fix       Run ruff linter with auto-fix (srun, CPU)"
+	@echo "  make env-check      Verify uv env + torch/CUDA (srun GPU)"
+	@echo "  make jobs           List your queued/running SLURM jobs"
 	@echo "  ─────────────────────────────────────────────────────────"
 	@echo ""
 
@@ -78,26 +79,21 @@ preprocess:
 # ==============================================================================
 .PHONY: pilot
 pilot:
-	$(SRUN_GPU) bash -c '$(MM_ACTIVATE) && \
-		python -c "import torch; torch.set_float32_matmul_precision(\"high\")" && \
-		python scripts/pilot_run.py'
+	$(SRUN_GPU) bash -c 'cd $(CURDIR) && uv run python scripts/pilot_run.py'
 
 .PHONY: pilot-64
 pilot-64:
-	$(SRUN_GPU) bash -c '$(MM_ACTIVATE) && \
-		python scripts/pilot_run.py ++data.max_total_nodes=64'
+	$(SRUN_GPU) bash -c 'cd $(CURDIR) && uv run python scripts/pilot_run.py ++data.max_total_nodes=64'
 
 .PHONY: pilot-128
 pilot-128:
-	$(SRUN_GPU) bash -c '$(MM_ACTIVATE) && \
-		python scripts/pilot_run.py ++data.max_total_nodes=128'
+	$(SRUN_GPU) bash -c 'cd $(CURDIR) && uv run python scripts/pilot_run.py ++data.max_total_nodes=128'
 
 .PHONY: pilot-384
 pilot-384:
-	$(SRUN_GPU) bash -c '$(MM_ACTIVATE) && \
-		python scripts/pilot_run.py ++data.max_total_nodes=384'
+	$(SRUN_GPU) bash -c 'cd $(CURDIR) && uv run python scripts/pilot_run.py ++data.max_total_nodes=384'
 
-# Run all three pilot stages back-to-back in one srun allocation
+# Run all three pilot stages back-to-back in one sbatch allocation
 .PHONY: pilot-all
 pilot-all:
 	sbatch scripts/SLURM/02_pilot_run.sh
@@ -119,9 +115,7 @@ PDB ?= inputs/target.pdb
 
 .PHONY: inference
 inference:
-	$(SRUN_GPU) bash -c '$(MM_ACTIVATE) && \
-		python -c "import torch; torch.set_float32_matmul_precision(\"high\")" && \
-		python scripts/inference.py \
+	$(SRUN_GPU) bash -c 'cd $(CURDIR) && uv run python scripts/inference.py \
 		--pdb $(PDB) \
 		--config $(CONFIG) \
 		--ckpt $(CKPT)'
@@ -136,31 +130,29 @@ infer: inference
 # ==============================================================================
 .PHONY: test
 test:
-	$(SRUN_CPU) bash -c '$(MM_ACTIVATE) && \
-		python -m pytest tests/ -v --tb=short'
+	$(SRUN_CPU) bash -c 'cd $(CURDIR) && uv run python -m pytest tests/ -v --tb=short'
 
 .PHONY: test-fast
 test-fast:
-	$(SRUN_CPU) bash -c '$(MM_ACTIVATE) && \
-		python -m pytest tests/ -v --tb=short -x'
+	$(SRUN_CPU) bash -c 'cd $(CURDIR) && uv run python -m pytest tests/ -v --tb=short -x'
 
 .PHONY: lint
 lint:
-	$(SRUN_CPU) bash -c '$(MM_ACTIVATE) && ruff check src/ scripts/ tests/'
+	$(SRUN_CPU) bash -c 'cd $(CURDIR) && uv run ruff check src/ scripts/ tests/'
 
 .PHONY: lint-fix
 lint-fix:
-	$(SRUN_CPU) bash -c '$(MM_ACTIVATE) && ruff check --fix src/ scripts/ tests/'
+	$(SRUN_CPU) bash -c 'cd $(CURDIR) && uv run ruff check --fix src/ scripts/ tests/'
 
 
 # ==============================================================================
 # ENV UTILITIES
 # ==============================================================================
 
-# Verify your GPU, CUDA, and torch setup are all wired correctly
+# Verify GPU, CUDA, and torch setup
 .PHONY: env-check
 env-check:
-	$(SRUN_GPU) bash -c '$(MM_ACTIVATE) && python -c "\
+	$(SRUN_GPU) bash -c 'cd $(CURDIR) && uv run python -c "\
 import torch; \
 print(\"torch:\", torch.__version__); \
 print(\"CUDA available:\", torch.cuda.is_available()); \

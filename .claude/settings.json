@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rtk --help)",
+      "Bash(rtk init:*)"
+    ]
+  }
+}
