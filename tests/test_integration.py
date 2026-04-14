@@ -52,7 +52,11 @@ class TestPipelineEndToEnd:
         assert loss.item() > 0
 
     def test_lightning_training_step(self):
-        """UMAInverseLightningModule.training_step() returns finite loss."""
+        """UMAInverseLightningModule loss computation returns finite loss.
+
+        Tests _compute_loss_and_metrics directly — training_step is designed to
+        be called by a Trainer (which sets up the optimizer/logger context).
+        """
         module = UMAInverseLightningModule(
             model_config=small_model_config(),
             lr=1e-3,
@@ -61,11 +65,16 @@ class TestPipelineEndToEnd:
         )
         module.train()
         batch = collate_batch([make_sample(L=8, M=3)])
-        loss  = module.training_step(batch, batch_idx=0)
-        assert torch.isfinite(loss)
+        metrics = module._compute_loss_and_metrics(batch)
+        assert torch.isfinite(metrics["loss"])
+        assert torch.isfinite(metrics["acc"])
 
     def test_lightning_training_step_deterministic(self):
-        """Same input + same (epoch, batch_idx) → identical loss (deterministic decoding)."""
+        """Same input → identical loss (deterministic decoding order).
+
+        Tests _compute_loss_and_metrics directly — training_step is designed to
+        be called by a Trainer (which sets up the optimizer/logger context).
+        """
         import copy
         module = UMAInverseLightningModule(
             model_config=small_model_config(),
@@ -75,13 +84,19 @@ class TestPipelineEndToEnd:
         )
         module.train()
         batch = collate_batch([make_sample(L=8, M=3)])
-        # Deep-copy before training_step mutates batch with decoding_order
         batch_copy = copy.deepcopy(batch)
 
-        loss1 = module.training_step(batch,      batch_idx=5)
-        loss2 = module.training_step(batch_copy, batch_idx=5)
-        # With dropout=0 and seeded decoding order, identical inputs → identical loss
-        assert torch.isclose(loss1, loss2, atol=1e-5)
+        # Insert identical deterministic decoding orders before calling
+        B, L = batch["residue_mask"].shape
+        g = torch.Generator()
+        g.manual_seed(5_000_005)  # epoch=5, batch_idx=5
+        order = torch.argsort(torch.argsort(torch.rand(L, generator=g)))
+        batch["decoding_order"]      = order.unsqueeze(0)
+        batch_copy["decoding_order"] = order.unsqueeze(0)
+
+        metrics1 = module._compute_loss_and_metrics(batch)
+        metrics2 = module._compute_loss_and_metrics(batch_copy)
+        assert torch.isclose(metrics1["loss"], metrics2["loss"], atol=1e-5)
 
     def test_gradient_flows_through_full_model(self):
         """Backward pass over the full model should produce finite, non-zero gradients."""

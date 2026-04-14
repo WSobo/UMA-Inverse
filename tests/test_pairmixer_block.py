@@ -49,14 +49,13 @@ def test_triangle_mul_mask_zeroes_padding(cls):
     mod = cls(dim=16, hidden_dim=16)
     z = torch.randn(1, 6, 6, 16)
 
-    # All-ones mask
-    mask_full = torch.ones(1, 6, 6)
-    out_full = mod(z, mask=mask_full)
-
     # Mask out the last row/col (indices 4, 5)
-    mask_partial = mask_full.clone()
+    mask_partial = torch.ones(1, 6, 6)
     mask_partial[:, 4:, :] = 0
     mask_partial[:, :, 4:] = 0
+
+    # Baseline: original z with partial mask
+    out_baseline = mod(z, mask=mask_partial)
 
     # Perturb the masked region — valid outputs should not change
     z_perturbed = z.clone()
@@ -66,7 +65,7 @@ def test_triangle_mul_mask_zeroes_padding(cls):
     out_perturbed = mod(z_perturbed, mask=mask_partial)
 
     # Valid region [0:4, 0:4] should match (within float tolerance)
-    assert torch.allclose(out_full[:, :4, :4, :], out_perturbed[:, :4, :4, :], atol=1e-4)
+    assert torch.allclose(out_baseline[:, :4, :4, :], out_perturbed[:, :4, :4, :], atol=1e-4)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
