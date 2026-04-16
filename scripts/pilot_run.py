@@ -67,12 +67,17 @@ def main(cfg: DictConfig) -> None:
     model_cfg["dropout"] = 0.0
     model_cfg["gradient_checkpointing"] = False
 
+    # Pilot budget — override via `++pilot.epochs=500` on the CLI.
+    # LR schedule (warmup + T_max) scales with the epoch budget.
+    pilot_epochs = int(OmegaConf.select(cfg, "pilot.epochs", default=100))
+    pilot_warmup = max(10, pilot_epochs // 10)
+
     model = UMAInverseLightningModule(
         model_config=model_cfg,
         lr=float(cfg.training.lr),
         weight_decay=0.0,
-        warmup_steps=10,
-        T_max=100,
+        warmup_steps=pilot_warmup,
+        T_max=pilot_epochs,
         compile_model=False,
         fixed_decoding_order=True,
     )
@@ -91,7 +96,7 @@ def main(cfg: DictConfig) -> None:
     )
 
     trainer = pl.Trainer(
-        max_epochs=100,
+        max_epochs=pilot_epochs,
         accelerator=accelerator,
         devices=1,
         precision=precision,
