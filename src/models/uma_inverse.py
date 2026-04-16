@@ -70,6 +70,18 @@ class UMAInverse(nn.Module):
         self.ligand_in = nn.Linear(ligand_input_dim, node_dim)
         self.node_norm = nn.LayerNorm(node_dim)
 
+        # Relative position encoding for the residue-residue pair tensor.
+        # Many residues share near-identical 6D dihedral features (e.g. all
+        # helical positions), and the encoder alone cannot distinguish them.
+        # Relpos gives each (i, j) pair a sequence-offset signature, which is
+        # both necessary for the 1-batch overfit sanity check to converge and
+        # standard in every modern structure-conditioned sequence model
+        # (ProteinMPNN, AF2/3, Boltz, ESM-IF).
+        self.relpos_max = int(config.get("relpos_max", 32))
+        self.relpos_emb = nn.Embedding(2 * self.relpos_max + 2, pair_dim)
+        # Last index (2*relpos_max + 1) reserved for "not a residue-residue pair"
+        # (i.e. at least one of i,j is a ligand atom) — separate learnable bias.
+
         self.pair_i = nn.Linear(node_dim, pair_dim, bias=False)
         self.pair_j = nn.Linear(node_dim, pair_dim, bias=False)
         self.rbf = RBFEmbedding(
@@ -88,15 +100,31 @@ class UMAInverse(nn.Module):
         )
 
         # Pair-to-node readout: feed encoder's geometric knowledge back to residue nodes.
-        # After the encoder refines z, this projects the mean-pooled pair rows back into
-        # node space so the decoder sees updated structural context (not just raw embeddings).
+        # Attention-weighted pool (not mean): each residue learns which j positions —
+        # including ligand atoms — deserve weight in its per-residue summary. A uniform
+        # mean averages away the position-specific signal the encoder just computed,
+        # which was the primary bottleneck blocking the 1-batch overfit sanity check.
+        self.pair_readout_attn = nn.Linear(pair_dim, 1, bias=False)
         self.node_readout = nn.Linear(pair_dim, node_dim)
 
         # Separate residue-protein and residue-ligand contexts for the decoder.
         # Avoids ligand signal being diluted (ligand atoms are ~8% of a typical mean pool).
         self.ctx_proj = nn.Linear(2 * pair_dim, pair_dim)
 
-        self.ar_pair_to_scalar = nn.Linear(pair_dim, 1, bias=False)
+        # Multi-head AR attention: pair slot (i,j) → per-head attention logit
+        # (previously a single scalar score — too narrow for teacher forcing to leak
+        # useful identity information, causing the 1-batch overfit to plateau).
+        self.ar_num_heads = int(config.get("ar_num_heads", 4))
+        if node_dim % self.ar_num_heads != 0:
+            raise ValueError(
+                f"node_dim ({node_dim}) must be divisible by ar_num_heads "
+                f"({self.ar_num_heads})."
+            )
+        self.ar_head_dim = node_dim // self.ar_num_heads
+        self.ar_pair_to_attn = nn.Linear(pair_dim, self.ar_num_heads, bias=False)
+        self.ar_value = nn.Linear(node_dim, node_dim, bias=False)
+        self.ar_out = nn.Linear(node_dim, node_dim, bias=False)
+
         self.token_embedding = nn.Embedding(21, node_dim)
 
         self.decoder = nn.Sequential(
@@ -106,7 +134,9 @@ class UMAInverse(nn.Module):
             nn.Linear(node_dim, 21),
         )
 
-    def _init_pair(self, node_repr: Tensor, coords: Tensor, pair_mask: Tensor) -> Tensor:
+    def _init_pair(
+        self, node_repr: Tensor, coords: Tensor, pair_mask: Tensor, residue_count: int
+    ) -> Tensor:
         node_i = self.pair_i(node_repr).unsqueeze(2)
         node_j = self.pair_j(node_repr).unsqueeze(1)
 
@@ -116,7 +146,18 @@ class UMAInverse(nn.Module):
             dist = torch.clamp(dist + noise, min=0.0)
 
         rbf = self.rbf_proj(self.rbf(dist).to(node_repr.dtype))
-        z = node_i + node_j + rbf
+
+        # Relative position bias: clamp (i-j) to [-relpos_max, +relpos_max],
+        # reserve the last bin for any pair involving a ligand atom.
+        B, N, _ = node_repr.shape
+        idx = torch.arange(N, device=node_repr.device)
+        rel = idx.unsqueeze(1) - idx.unsqueeze(0)  # [N, N]
+        rel = rel.clamp(-self.relpos_max, self.relpos_max) + self.relpos_max  # [0, 2*max]
+        is_ligand_pair = (idx.unsqueeze(1) >= residue_count) | (idx.unsqueeze(0) >= residue_count)
+        rel = torch.where(is_ligand_pair, torch.full_like(rel, 2 * self.relpos_max + 1), rel)
+        relpos = self.relpos_emb(rel).unsqueeze(0).to(node_repr.dtype)  # [1, N, N, pair_dim]
+
+        z = node_i + node_j + rbf + relpos
         return z * pair_mask.unsqueeze(-1).to(dtype=z.dtype)
 
     def _ligand_aware_context(self, z: Tensor, pair_mask: Tensor, residue_count: int) -> Tensor:
@@ -155,26 +196,39 @@ class UMAInverse(nn.Module):
         rr = z[:, :residue_count, :residue_count, :]
         token_emb = self.token_embedding(sequence.clamp(min=0, max=20))
 
-        score = self.ar_pair_to_scalar(rr).squeeze(-1)
-        score = score / math.sqrt(float(self.pair_dim))
+        H, D = self.ar_num_heads, self.ar_head_dim
+
+        # Per-head attention logits from pair tensor: [B, L, L, H] → [B, H, L, L]
+        logits = self.ar_pair_to_attn(rr) / math.sqrt(float(self.pair_dim))
+        logits = logits.permute(0, 3, 1, 2)
 
         if decoding_order is None:
-            decoding_order = torch.arange(residue_count, device=z.device).unsqueeze(0).expand(batch_size, -1)
+            decoding_order = torch.arange(
+                residue_count, device=z.device
+            ).unsqueeze(0).expand(batch_size, -1)
 
-        decoding_order_i = decoding_order.unsqueeze(2)  # [B, L, 1]
-        decoding_order_j = decoding_order.unsqueeze(1)  # [B, 1, L]
-        causal = decoding_order_i > decoding_order_j    # True if j was decoded before i
+        decoding_order_i = decoding_order.unsqueeze(2)
+        decoding_order_j = decoding_order.unsqueeze(1)
+        causal = decoding_order_i > decoding_order_j
 
         valid = causal & residue_mask[:, :, None].bool() & residue_mask[:, None, :].bool()
+        valid_h = valid.unsqueeze(1)  # [B, 1, L, L] → broadcasts over heads
 
-        score = score.masked_fill(~valid, -1e4)
-        probs = torch.softmax(score, dim=-1)
-        probs = probs * valid.to(dtype=probs.dtype)
-        # Avoid division by zero for the first decoded residue
-        denominator = probs.sum(dim=-1, keepdim=True)
-        probs = torch.where(denominator > 0, probs / denominator, torch.zeros_like(probs))
+        logits = logits.masked_fill(~valid_h, -1e4)
+        weights = torch.softmax(logits, dim=-1)
+        weights = weights * valid_h.to(dtype=weights.dtype)
+        # The first-decoded residue has no valid j — weight row sums to 0 and stays zero.
+        denominator = weights.sum(dim=-1, keepdim=True)
+        weights = torch.where(denominator > 0, weights / denominator, torch.zeros_like(weights))
 
-        return torch.einsum("bij,bjc->bic", probs, token_emb)
+        # Per-head values from token embeddings: [B, L, node_dim] → [B, H, L, D]
+        values = self.ar_value(token_emb).view(batch_size, residue_count, H, D)
+        values = values.permute(0, 2, 1, 3)
+
+        # Weighted sum: [B, H, L, L] @ [B, H, L, D] → [B, H, L, D] → [B, L, node_dim]
+        ctx = torch.matmul(weights, values).permute(0, 2, 1, 3).contiguous()
+        ctx = ctx.view(batch_size, residue_count, H * D)
+        return self.ar_out(ctx)
 
     def forward(self, batch: Dict[str, Tensor]) -> Dict[str, Tensor]:
         residue_coords = batch["residue_coords"]
@@ -196,13 +250,24 @@ class UMAInverse(nn.Module):
         node_mask = torch.cat([residue_mask, ligand_mask], dim=1)
 
         pair_mask = node_mask[:, :, None] & node_mask[:, None, :]
-        z = self._init_pair(node_repr=node_repr, coords=coords, pair_mask=pair_mask)
+        z = self._init_pair(
+            node_repr=node_repr,
+            coords=coords,
+            pair_mask=pair_mask,
+            residue_count=residue_count,
+        )
         z = self.encoder(z, pair_mask.to(dtype=z.dtype))
 
-        # Pair-to-node readout: mean-pool encoder pair rows → residue node updates.
-        # This lets 6 blocks of geometric reasoning inform the per-residue representation
-        # rather than being compressed entirely into the ligand context below.
-        z_pooled = z[:, :residue_count, :, :].mean(dim=2)      # [B, L, pair_dim]
+        # Attention-based pair-to-node readout: learned weights over the pair row so
+        # each residue focuses on the j positions (residues or ligand atoms) that
+        # matter for its own identity. Masked softmax keeps pad columns at zero mass.
+        z_res = z[:, :residue_count, :, :]                                      # [B, L, N, pair_dim]
+        readout_logits = self.pair_readout_attn(z_res).squeeze(-1)              # [B, L, N]
+        readout_logits = readout_logits.masked_fill(
+            ~node_mask.unsqueeze(1).bool(), -1e4
+        )
+        readout_w = torch.softmax(readout_logits, dim=-1)                       # [B, L, N]
+        z_pooled = torch.einsum("bln,blnd->bld", readout_w, z_res)              # [B, L, pair_dim]
         node_repr_res = node_repr[:, :residue_count, :] + self.node_readout(z_pooled)
 
         ligand_context = self._ligand_aware_context(z, pair_mask, residue_count=residue_count)

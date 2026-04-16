@@ -55,19 +55,35 @@ def main(cfg: DictConfig) -> None:
         max_total_nodes=int(cfg.data.max_total_nodes),
     )
 
+    # Pilot-specific overrides:
+    # 1. LR schedule — default (warmup=500, T_max=50k) is tuned for full training
+    #    and never escapes warmup in a 100-step pilot (peak LR ≈ 6e-5 ≈ 5% of
+    #    nominal). Scale to the pilot budget.
+    # 2. Regularization off — dropout and weight_decay prevent a 1-batch overfit
+    #    from converging to near-zero loss (the whole point of the sanity check).
+    #    Gradient checkpointing is an AMP/autograd interaction risk on tiny
+    #    models; disable for the pilot to remove an unknown from the result.
+    model_cfg = OmegaConf.to_container(cfg.model, resolve=True)
+    model_cfg["dropout"] = 0.0
+    model_cfg["gradient_checkpointing"] = False
+
     model = UMAInverseLightningModule(
-        model_config=OmegaConf.to_container(cfg.model, resolve=True),
+        model_config=model_cfg,
         lr=float(cfg.training.lr),
-        weight_decay=float(cfg.training.weight_decay),
+        weight_decay=0.0,
+        warmup_steps=10,
+        T_max=100,
         compile_model=False,
+        fixed_decoding_order=True,
     )
 
     accelerator = str(cfg.training.accelerator)
-    precision   = str(cfg.training.precision)
+    # Pilot always runs in fp32: bf16-mixed loses too much precision for the
+    # small gradients needed to drive a 1-batch overfit to near-zero loss.
+    precision = "32-true"
     if accelerator == "gpu" and not torch.cuda.is_available():
         logger.warning("GPU not available — falling back to CPU")
         accelerator = "cpu"
-        precision   = "32-true"
 
     pilot_logger = CSVLogger(
         save_dir=os.path.join(PROJECT_ROOT, "logs", "pilot"),

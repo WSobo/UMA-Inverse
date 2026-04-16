@@ -33,6 +33,7 @@ class UMAInverseLightningModule(pl.LightningModule):
         warmup_steps: int = 500,
         T_max: int = 50_000,
         compile_model: bool = False,
+        fixed_decoding_order: bool = False,
     ) -> None:
         super().__init__()
 
@@ -92,7 +93,13 @@ class UMAInverseLightningModule(pl.LightningModule):
         # Seeded by (current_epoch * 1e6 + batch_idx) for reproducibility.
         if "decoding_order" not in batch:
             B, L = batch["residue_mask"].shape
-            seed = self.current_epoch * 1_000_000 + batch_idx
+            # fixed_decoding_order=True freezes the order across epochs, needed
+            # for the 1-batch overfit sanity check (otherwise teacher forcing
+            # injects per-epoch noise that prevents memorisation).
+            if self.hparams.fixed_decoding_order:
+                seed = batch_idx
+            else:
+                seed = self.current_epoch * 1_000_000 + batch_idx
             g = torch.Generator(device=batch["residue_mask"].device)
             g.manual_seed(seed)
             orders = []

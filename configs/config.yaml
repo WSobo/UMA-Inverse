@@ -3,8 +3,8 @@ run_name: pairmixer-inverse-v1
 seed: 42
 
 paths:
-  train_json: ../LigandMPNN/training/train.json
-  valid_json: ../LigandMPNN/training/valid.json
+  train_json: LigandMPNN/training/train.json
+  valid_json: LigandMPNN/training/valid.json
   pdb_dir: data/raw/pdb_archive
   output_dir: outputs
 
