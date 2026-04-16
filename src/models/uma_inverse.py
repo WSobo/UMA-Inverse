@@ -127,9 +127,13 @@ class UMAInverse(nn.Module):
 
         self.token_embedding = nn.Embedding(21, node_dim)
 
+        # Decoder input: [node_repr_res | ar_context | ligand_context].
+        # ar_context is a separate channel (not summed into node_repr_res) so the
+        # decoder has a direct token-identity signal independent of the structural
+        # representation — matches LigandMPNN's per-position node||prev-token concat.
         self.decoder = nn.Sequential(
-            nn.LayerNorm(node_dim + pair_dim),
-            nn.Linear(node_dim + pair_dim, node_dim),
+            nn.LayerNorm(2 * node_dim + pair_dim),
+            nn.Linear(2 * node_dim + pair_dim, node_dim),
             nn.GELU(),
             nn.Linear(node_dim, 21),
         )
@@ -279,7 +283,7 @@ class UMAInverse(nn.Module):
         )
 
         decoder_input = torch.cat(
-            [node_repr_res + ar_context, ligand_context],
+            [node_repr_res, ar_context, ligand_context],
             dim=-1,
         )
         logits = self.decoder(decoder_input)
