@@ -1,0 +1,18 @@
+model_config:
+  residue_input_dim: 6
+  ligand_input_dim: 6
+  node_dim: 128
+  pair_dim: 128
+  pair_hidden_dim: 128
+  num_pairmixer_blocks: 6
+  pair_transition_mult: 4
+  num_rbf: 32
+  max_distance: 24.0
+  dropout: 0.1
+  gradient_checkpointing: true
+  thermal_noise_std: 0.0
+lr: 0.0003
+weight_decay: 0.01
+warmup_steps: 500
+T_max: 50000
+compile_model: false
