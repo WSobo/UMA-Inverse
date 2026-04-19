@@ -33,6 +33,43 @@ def _log_failed_pdb(pdb_id: str, reason: str) -> None:
         pass  # never crash the training loop over logging
 
 
+def _apply_runtime_crop(item: Dict[str, torch.Tensor], max_total_nodes: int) -> Dict[str, torch.Tensor]:
+    """Re-crop a cached sample to max_total_nodes (residues + ligand atoms).
+
+    The preprocessing cache is built with a large cap (e.g. 1024). When the
+    curriculum asks for a tighter crop, we pick the residues closest to the
+    ligand centroid — matching the selection logic used at preprocessing time.
+    """
+    residue_coords = item["residue_coords"]
+    ligand_coords  = item["ligand_coords"]
+    n_res = residue_coords.shape[0]
+    n_lig = ligand_coords.shape[0]
+
+    if n_res + n_lig <= max_total_nodes:
+        return item
+
+    max_residues = max(1, max_total_nodes - n_lig)
+    if n_res <= max_residues:
+        return item
+
+    if n_lig > 0:
+        center = ligand_coords.mean(dim=0, keepdim=True)
+        dist = torch.linalg.norm(residue_coords - center, dim=-1)
+        keep = torch.topk(dist, k=max_residues, largest=False).indices
+        keep, _ = torch.sort(keep)
+    else:
+        keep = torch.arange(max_residues, device=residue_coords.device)
+
+    return {
+        **item,
+        "residue_coords":   item["residue_coords"][keep],
+        "residue_features": item["residue_features"][keep],
+        "residue_mask":     item["residue_mask"][keep],
+        "sequence":         item["sequence"][keep],
+        "design_mask":      item["design_mask"][keep],
+    }
+
+
 class UMAInverseDataset(Dataset):
     def __init__(
         self,
@@ -82,6 +119,7 @@ class UMAInverseDataset(Dataset):
         if os.path.exists(processed_path):
             try:
                 item = torch.load(processed_path, map_location="cpu", weights_only=True)
+                item = _apply_runtime_crop(item, self.max_total_nodes)
                 item["pdb_id"] = pdb_id
                 return item
             except (RuntimeError, EOFError, OSError) as e:

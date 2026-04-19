@@ -19,8 +19,12 @@ training:
   log_every_n_steps: 20
   accumulate_grad_batches: 1
   compile_model: false
-  warmup_steps: 500
-  T_max: 50000
+  # Per-stage overrides in scripts/SLURM/03_train_model.sh tune these to each
+  # stage's actual step budget. The defaults below are sized for a single
+  # stage-1 run at bsz=8 (~280K steps for 15 epochs at ~145K samples/epoch)
+  # so that ad-hoc `train.py` invocations don't silently freeze the LR.
+  warmup_steps: 1000
+  T_max: 280000
   early_stop_patience: 10
 
 wandb:
@@ -38,12 +42,12 @@ model:
   num_rbf: 32
   max_distance: 24.0
   dropout: 0.1
-  gradient_checkpointing: true
+  gradient_checkpointing: false
   thermal_noise_std: 0.0
 
 data:
-  batch_size: 1
-  num_workers: 2
+  batch_size: 8
+  num_workers: 8
   pin_memory: true
   ligand_context_atoms: 25
   cutoff_for_score: 8.0
