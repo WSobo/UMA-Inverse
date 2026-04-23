@@ -115,7 +115,7 @@ PDB ?= inputs/target.pdb
 
 .PHONY: inference
 inference:
-	$(SRUN_GPU) bash -c 'cd $(CURDIR) && uv run python scripts/inference.py \
+	$(SRUN_GPU) bash -c 'cd $(CURDIR) && uv run uma-inverse design \
 		--pdb $(PDB) \
 		--config $(CONFIG) \
 		--ckpt $(CKPT)'
@@ -123,6 +123,17 @@ inference:
 # Inference shorthand: make infer PDB=my_structure.pdb
 .PHONY: infer
 infer: inference
+
+
+# ==============================================================================
+# BENCHMARK — submit the full paper-metric pipeline as sbatch.
+# Override via sbatch --export; see scripts/SLURM/05_benchmark.sh and
+# docs/benchmarks.md for the full set of knobs.
+# ==============================================================================
+
+.PHONY: benchmark
+benchmark:
+	sbatch scripts/SLURM/05_benchmark.sh
 
 
 # ==============================================================================

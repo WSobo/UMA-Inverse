@@ -123,13 +123,25 @@ def _select_residue_crop(
 
 # ── Public entry point ────────────────────────────────────────────────────────
 
+def _format_residue_id(chain_id: str, res_num: int, insertion_code: str) -> str:
+    """Format a per-residue identifier matching LigandMPNN's convention.
+
+    Format: ``<chain><resnum>[<insertion_code>]`` — e.g. ``"A23"``, ``"B42C"``.
+    Insertion codes are appended verbatim when non-empty.
+    """
+    return f"{chain_id}{res_num}{insertion_code}"
+
+
 def load_example_from_pdb(
     pdb_path: str,
     ligand_context_atoms: int = 25,
     cutoff_for_score: float = 8.0,
     max_total_nodes: int = 384,
     device: str = "cpu",
-) -> Dict[str, torch.Tensor]:
+    parse_chains: Optional[List[str]] = None,
+    include_zero_occupancy: bool = False,
+    return_residue_ids: bool = False,
+) -> Dict[str, object]:
     """Featurize a single PDB file into model-ready tensors.
 
     Uses the self-contained ``pdb_parser.parse_pdb`` — no LigandMPNN clone
@@ -144,6 +156,16 @@ def load_example_from_pdb(
         max_total_nodes: Hard cap on total nodes (residues + ligand atoms).
             Excess residues are cropped to those nearest the ligand centroid.
         device: Torch device string.
+        parse_chains: When provided, only residues from these chain IDs are
+            included. Ligand atoms are still parsed from every chain.
+        include_zero_occupancy: When True, atoms with occupancy=0 are retained
+            (matches LigandMPNN's ``parse_atoms_with_zero_occupancy=1``).
+        return_residue_ids: When True, the output dict includes a
+            ``residue_ids`` key — a ``List[str]`` of per-residue identifiers
+            (``"A23"``, ``"B42C"``) in the same order as ``residue_coords``.
+            Required for inference-time chain-letter residue selection
+            (fixed/redesigned residues, per-residue bias/omit). The training
+            pipeline leaves this False to avoid the small per-batch overhead.
 
     Returns:
         Dict with keys:
@@ -156,8 +178,15 @@ def load_example_from_pdb(
         * ``ligand_coords``    ``[M, 3]``    ligand heavy-atom coords
         * ``ligand_features``  ``[M, 6]``    element one-hot
         * ``ligand_mask``      ``[M]``       all-True (valid ligand atoms only)
+        * ``residue_ids``      ``List[str]`` (when ``return_residue_ids=True``)
     """
-    parsed = parse_pdb(pdb_path, cutoff_for_score=cutoff_for_score, device=device)
+    parsed = parse_pdb(
+        pdb_path,
+        cutoff_for_score=cutoff_for_score,
+        device=device,
+        parse_chains=parse_chains,
+        include_zero_occupancy=include_zero_occupancy,
+    )
 
     x            = parsed["X"]           # [L, 4, 3]
     residue_mask = parsed["mask"].bool() # [L]
@@ -168,6 +197,18 @@ def load_example_from_pdb(
     residue_features = _compute_backbone_dihedrals(x)[residue_mask]  # [L_valid, 6]
     sequence         = parsed["S"][residue_mask].long()        # [L_valid]
     design_mask      = chain_mask[residue_mask].bool()         # [L_valid]
+
+    residue_ids_valid: Optional[List[str]] = None
+    if return_residue_ids:
+        chain_ids = parsed["chain_ids"]
+        res_nums = parsed["res_nums"]
+        insertion_codes = parsed["insertion_codes"]
+        mask_list = residue_mask.tolist()
+        residue_ids_valid = [
+            _format_residue_id(chain_ids[i], res_nums[i], insertion_codes[i])
+            for i in range(len(mask_list))
+            if mask_list[i]
+        ]
 
     y   = parsed["Y"]           # [M_all, 3]
     y_t = parsed["Y_t"]         # [M_all]
@@ -211,7 +252,11 @@ def load_example_from_pdb(
     sequence         = sequence[keep_idx]
     design_mask      = design_mask[keep_idx]
 
-    return {
+    if residue_ids_valid is not None:
+        keep_indices = keep_idx.tolist()
+        residue_ids_valid = [residue_ids_valid[i] for i in keep_indices]
+
+    output: Dict[str, object] = {
         "residue_coords":   residue_coords.float(),
         "residue_features": residue_features.float(),
         "residue_mask":     torch.ones(residue_coords.shape[0], dtype=torch.bool, device=device),
@@ -221,3 +266,6 @@ def load_example_from_pdb(
         "ligand_features":  ligand_features.float(),
         "ligand_mask":      torch.ones(ligand_coords.shape[0], dtype=torch.bool, device=device),
     }
+    if residue_ids_valid is not None:
+        output["residue_ids"] = residue_ids_valid
+    return output

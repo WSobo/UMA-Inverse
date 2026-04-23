@@ -46,17 +46,17 @@ uv run python scripts/train.py \
 # STAGE 2: INTERMEDIATE CROPPING (N=128)
 # Steps/epoch ≈ 145K / 4 = 36_300  |  25 delta epochs ≈ 908K steps
 # =========================================================================
-echo ">> [STAGE 2] Up to epoch 40 (25 delta) at max_total_nodes=128, bsz=4"
+echo ">> [STAGE 2] 25 epochs at max_total_nodes=128, bsz=4"
 uv run python scripts/train.py \
     run_name="pairmixerinv-stage2-nodes128" \
-    ++trainer.max_epochs=40 \
+    ++trainer.max_epochs=25 \
     ++data.max_total_nodes=128 \
     ++data.batch_size=4 \
     ++data.num_workers=8 \
     ++model.gradient_checkpointing=false \
     ++training.warmup_steps=2000 \
-    ++training.T_max=940000 \
-    ++trainer.resume_from_checkpoint="checkpoints/last.ckpt"
+    ++training.T_max=910000 \
+    ++trainer.init_from_checkpoint="checkpoints/last.ckpt"
 
 # =========================================================================
 # STAGE 3: FULL CONTEXT (N=384)
@@ -64,16 +64,16 @@ uv run python scripts/train.py \
 # grad_ckpt=true reintroduced here because 384² pair tensor activations
 # across 6 blocks approach 24GB at bsz=2 without checkpointing.
 # =========================================================================
-echo ">> [STAGE 3] Up to epoch 100 (60 delta) at max_total_nodes=384, bsz=2, grad_ckpt=on"
+echo ">> [STAGE 3] 60 epochs at max_total_nodes=384, bsz=2, grad_ckpt=on"
 uv run python scripts/train.py \
     run_name="pairmixerinv-stage3-nodes384" \
-    ++trainer.max_epochs=100 \
+    ++trainer.max_epochs=60 \
     ++data.max_total_nodes=384 \
     ++data.batch_size=2 \
     ++data.num_workers=8 \
     ++model.gradient_checkpointing=true \
     ++training.warmup_steps=5000 \
     ++training.T_max=4400000 \
-    ++trainer.resume_from_checkpoint="checkpoints/last.ckpt"
+    ++trainer.init_from_checkpoint="checkpoints/last.ckpt"
 
 echo "Full Curriculum Campaign Complete!"

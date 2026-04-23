@@ -39,7 +39,7 @@ UMA-Inverse/
 
 ## Quickstart
 
-Please refer to [ORDER_OF_OPERATIONS.md](ORDER_OF_OPERATIONS.md) for the exact run sequence. 
+Please refer to [ORDER_OF_OPERATIONS.md](ORDER_OF_OPERATIONS.md) for the exact run sequence.
 
 ```bash
 cd UMA-Inverse
@@ -54,8 +54,34 @@ sbatch scripts/SLURM/02_pilot_run.sh
 # 3. Curriculum Training
 sbatch scripts/SLURM/03_train_model.sh
 
-# 4. Inference
-sbatch scripts/SLURM/04_inference.sh
+# 4. Inference (design sequences)
+uv run uma-inverse design --pdb my.pdb --ckpt checkpoints/last.ckpt --num-samples 10
+```
+
+## Inference
+
+The `uma-inverse` CLI exposes three subcommands. See
+[docs/inference.md](docs/inference.md) and [docs/benchmarks.md](docs/benchmarks.md)
+for the full references.
+
+```bash
+# Design new sequences for a PDB
+uv run uma-inverse design --pdb my.pdb --ckpt checkpoints/last.ckpt \
+    --num-samples 10 --temperature 0.1 --top-p 0.95 --seed 42 \
+    --fix "A1 A2 A3" --bias "W:3.0"
+
+# Batch mode with a JSON spec and crash recovery
+uv run uma-inverse design --pdb-list spec.json --ckpt ckpt.ckpt \
+    --out-dir outputs/screen --num-samples 5 --resume
+
+# Score native or user sequence
+uv run uma-inverse score --pdb my.pdb --ckpt checkpoints/last.ckpt \
+    --mode autoregressive --num-batches 10
+
+# Full benchmark suite for a trained checkpoint (writes paper-ready tables + figures)
+uv run uma-inverse benchmark --ckpt checkpoints/uma-inverse-best.ckpt \
+    --val-json LigandMPNN/training/valid.json --pdb-dir data/raw/pdb_archive \
+    --n-pdbs 500
 ```
 
 ## Single GPU defaults

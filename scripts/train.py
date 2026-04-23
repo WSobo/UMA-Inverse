@@ -135,8 +135,20 @@ def main(cfg: DictConfig) -> None:
         save_top_k=3,
         save_last=True,
     )
+    # Second callback retains every epoch snapshot unconditionally. The primary
+    # save_top_k=3 callback only updates `last.ckpt` when a new top-k save
+    # happens, so if val plateaus (as in stage 2) intermediate weights are
+    # lost. epoch_snapshot_cb guarantees we can always go back to any epoch.
+    epoch_snapshot_cb = ModelCheckpoint(
+        dirpath="checkpoints/epoch_snapshots",
+        filename="epoch-{epoch:02d}",
+        every_n_epochs=1,
+        save_top_k=-1,
+        save_on_train_epoch_end=True,
+    )
     callbacks = [
         checkpoint_cb,
+        epoch_snapshot_cb,
         LearningRateMonitor(logging_interval="step"),
         EarlyStopping(
             monitor="val/loss",
@@ -177,12 +189,40 @@ def main(cfg: DictConfig) -> None:
         num_sanity_val_steps=2,
     )
 
+    # Weights-only init (for stage transitions in the curriculum).
+    # Loads model weights from a prior checkpoint but discards optimizer,
+    # scheduler, global_step, and current_epoch — so the new stage gets a
+    # fresh warmup + cosine cycle sized to its own step budget. Use this
+    # when moving between curriculum stages (e.g. stage 1 → stage 2),
+    # where the LR schedule must restart.
+    #
+    # For crash recovery mid-stage use resume_from_checkpoint below, which
+    # restores full state (optimizer, scheduler, step counter).
+    init_ckpt_path = cfg.trainer.get("init_from_checkpoint") if cfg.get("trainer") else None
+    if init_ckpt_path:
+        if os.path.exists(init_ckpt_path):
+            logger.info(
+                "init_from_checkpoint: loading weights-only from %s (fresh optimizer + LR schedule)",
+                init_ckpt_path,
+            )
+            ckpt = torch.load(init_ckpt_path, map_location="cpu", weights_only=False)
+            state_dict = ckpt.get("state_dict", ckpt)
+            model.load_state_dict(state_dict, strict=True)
+        else:
+            logger.warning("init_from_checkpoint path not found: %s", init_ckpt_path)
+
     ckpt_path = None
     if cfg.get("trainer") and cfg.trainer.get("resume_from_checkpoint"):
         ckpt_path = cfg.trainer.resume_from_checkpoint
         if not os.path.exists(ckpt_path):
             logger.warning("resume_from_checkpoint path not found: %s", ckpt_path)
             ckpt_path = None
+
+    if init_ckpt_path and ckpt_path:
+        raise ValueError(
+            "Cannot set both init_from_checkpoint (weights-only) and "
+            "resume_from_checkpoint (full state) — pick one."
+        )
 
     trainer.fit(model=model, datamodule=datamodule, ckpt_path=ckpt_path)
 

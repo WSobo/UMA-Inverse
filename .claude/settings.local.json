@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(rtk ls:*)"
+      "Bash(rtk ls:*)",
+      "Bash(awk -F',' 'NR>1 && $9 ~ /[0-9]/ {lr=$9} END {print \"last lr=\" lr}' logs/csv/pairmixerinv-stage3-nodes384-ddp8/version_0/metrics.csv)",
+      "Bash(awk -F',' 'NR>1 && $1 ~ /^[0-9]+$/ && $4!=\"\" {print $1\",\"$9}' logs/csv/pairmixerinv-stage3-nodes384-ddp8/version_0/metrics.csv)"
     ]
   }
 }
