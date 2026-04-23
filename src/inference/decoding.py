@@ -364,9 +364,11 @@ def _decode_batch(
     # Track which tie groups have been sampled this batch (per sample)
     tie_done_by_sample = [set() for _ in range(B)]
 
-    # Per-sample RNG so seeds drive reproducibility through sampling too
-    # (CPU generator; multinomial uses device copy internally for GPU probs).
-    generators = [torch.Generator(device="cpu").manual_seed(int(s) + 7919) for s in batch_seeds]
+    # Per-sample RNG on the same device as the model's probabilities — current
+    # PyTorch requires the generator device to match the sampled tensor.
+    generators = [
+        torch.Generator(device=device).manual_seed(int(s) + 7919) for s in batch_seeds
+    ]
 
     # Iterate over positions in decoding-rank order. Since order can differ
     # across samples in the batch, we iterate by rank (0..L-1) and gather
