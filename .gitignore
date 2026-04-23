@@ -8,6 +8,11 @@ __pycache__/
 *.pyc
 .env
 
+#VS Code settings
+.vscode/
+.rtk/
+
+
 # Virtual envs
 .venv/
 venv/
