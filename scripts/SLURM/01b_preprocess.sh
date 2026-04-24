@@ -17,6 +17,10 @@ echo "Running on node: $SLURM_NODELIST"
 echo "Timestamp: $(date)"
 
 echo "Kicking off CPU-only preprocessing to cache .pt files..."
-uv run python scripts/preprocess.py
+# --recompute forces every .pt to be regenerated as a v2 union cache
+# (carries both featurizer keys plus residue_backbone_coords). Without it
+# the skip-if-exists path leaves legacy v1 files in place, producing a
+# mixed cache that the Dataset would reject and slow-path via PDB parsing.
+uv run python scripts/preprocess.py --recompute
 
 echo "Pre-processing completed at: $(date)"
