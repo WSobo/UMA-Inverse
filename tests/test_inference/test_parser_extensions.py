@@ -70,6 +70,9 @@ class TestLoadExampleBackCompat:
             "ligand_coords",
             "ligand_features",
             "ligand_mask",
+            # v2 phase 2: string traceability marker for the anchor used when
+            # building residue_coords. Dropped by collate_batch (non-tensor).
+            "residue_anchor_atom",
         }
         assert set(example.keys()) == expected
 

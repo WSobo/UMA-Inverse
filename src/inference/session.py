@@ -113,10 +113,11 @@ class InferenceSession:
         self.config = config
         self.device = device
         self.checkpoint_path = checkpoint_path
-        # v2 phase 1: data layer is the authoritative source; the model
-        # reads the same value via OmegaConf interpolation.
+        # v2 phase 1/2: data layer is the authoritative source; the model
+        # reads the same values via OmegaConf interpolation.
         data_section = config.data if "data" in config else {}
         self.ligand_featurizer = str(data_section.get("ligand_featurizer", "onehot6"))
+        self.residue_anchor = str(data_section.get("residue_anchor", "ca"))
 
     # ── Factory ───────────────────────────────────────────────────────────────
 
@@ -224,6 +225,7 @@ class InferenceSession:
             include_zero_occupancy=include_zero_occupancy,
             return_residue_ids=True,
             ligand_featurizer=self.ligand_featurizer,
+            residue_anchor=self.residue_anchor,
         )
 
         residue_ids: list[str] = example["residue_ids"]  # type: ignore[assignment]

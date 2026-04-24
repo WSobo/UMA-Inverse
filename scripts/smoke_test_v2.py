@@ -32,7 +32,10 @@ from src.models.uma_inverse import UMAInverse
 FIXTURE_PDB = PROJECT_ROOT / "tests" / "fixtures" / "1bc8.pdb"
 
 
-def _small_config(ligand_featurizer: str = "onehot6") -> dict:
+def _small_config(
+    ligand_featurizer: str = "onehot6",
+    residue_anchor: str = "ca",
+) -> dict:
     """Return a tiny UMAInverse config that runs quickly on CPU.
 
     Shapes are reduced across the board; the smoke test only needs to confirm
@@ -54,6 +57,7 @@ def _small_config(ligand_featurizer: str = "onehot6") -> dict:
         "relpos_max": 16,
         "ar_num_heads": 4,
         "ligand_featurizer": ligand_featurizer,
+        "residue_anchor": residue_anchor,
     }
 
 
@@ -80,7 +84,8 @@ def _build_batch(example: dict) -> dict:
 
 def test_v1_path() -> None:
     example = load_example_from_pdb(
-        str(FIXTURE_PDB), max_total_nodes=256, ligand_featurizer="onehot6",
+        str(FIXTURE_PDB), max_total_nodes=256,
+        ligand_featurizer="onehot6", residue_anchor="ca",
     )
     assert "ligand_features" in example, "v1 path must emit ligand_features"
     assert "ligand_atomic_numbers" not in example, \
@@ -90,6 +95,8 @@ def test_v1_path() -> None:
     assert example["ligand_features"].dim() == 2 and \
            example["ligand_features"].shape[1] == 6, \
         f"ligand_features shape should be [M, 6], got {tuple(example['ligand_features'].shape)}"
+    assert example.get("residue_anchor_atom") == "ca", \
+        f"expected residue_anchor_atom='ca', got {example.get('residue_anchor_atom')!r}"
 
     batch = _build_batch(example)
     L = batch["residue_coords"].shape[1]
@@ -97,7 +104,7 @@ def test_v1_path() -> None:
     assert batch["ligand_features"].shape == (1, M, 6), \
         f"batched ligand_features should be [1, M, 6], got {tuple(batch['ligand_features'].shape)}"
 
-    model = UMAInverse(_small_config("onehot6")).eval()
+    model = UMAInverse(_small_config("onehot6", "ca")).eval()
     with torch.no_grad():
         out = model(batch)
     logits = out["logits"]
@@ -143,6 +150,46 @@ def test_v2_phase1() -> None:
     assert logits.shape == (1, L, 21), \
         f"expected logits shape (1, {L}, 21), got {tuple(logits.shape)}"
     assert torch.isfinite(logits).all(), "v2 phase-1 logits contain NaN or Inf"
+
+
+def test_v2_phase2() -> None:
+    """Virtual Cβ anchor produces coords ~1.52 Å from Cα (covalent C-C bond)."""
+    example_ca = load_example_from_pdb(
+        str(FIXTURE_PDB), max_total_nodes=512, residue_anchor="ca",
+    )
+    example_cb = load_example_from_pdb(
+        str(FIXTURE_PDB), max_total_nodes=512, residue_anchor="cb",
+    )
+    assert example_ca.get("residue_anchor_atom") == "ca"
+    assert example_cb.get("residue_anchor_atom") == "cb"
+
+    ca = example_ca["residue_coords"]
+    cb = example_cb["residue_coords"]
+    assert ca.shape == cb.shape, \
+        f"coord shapes differ between anchors: {tuple(ca.shape)} vs {tuple(cb.shape)}"
+
+    # Covalent Cα-Cβ bond ≈ 1.52 Å. Virtual Cβ placement is approximate, so
+    # allow a modest tolerance; mean is very stable across residues.
+    dists = torch.linalg.norm(cb - ca, dim=-1)
+    mean_dist = dists.mean().item()
+    assert 1.45 <= mean_dist <= 1.65, \
+        f"mean |Cβ - Cα| = {mean_dist:.3f} Å, expected ~1.52 Å covalent bond"
+    # And the anchors should actually differ — guards against accidentally
+    # aliasing cb back to ca in the branch.
+    assert dists.min().item() > 0.5, \
+        f"min |Cβ - Cα| = {dists.min().item():.3f} Å — anchors look identical"
+
+    batch = _build_batch(example_cb)
+    L = batch["residue_coords"].shape[1]
+    model = UMAInverse(_small_config("onehot6", "cb")).eval()
+    assert model.residue_anchor == "cb", \
+        f"model.residue_anchor should be 'cb', got {model.residue_anchor!r}"
+    with torch.no_grad():
+        out = model(batch)
+    logits = out["logits"]
+    assert logits.shape == (1, L, 21), \
+        f"expected logits shape (1, {L}, 21), got {tuple(logits.shape)}"
+    assert torch.isfinite(logits).all(), "v2 phase-2 logits contain NaN or Inf"
 
 
 def test_strict_load_mismatch_v1_to_v2() -> None:
@@ -199,6 +246,7 @@ def main() -> int:
     tests: list[tuple[str, Callable[[], None]]] = [
         ("test_v1_path",                         test_v1_path),
         ("test_v2_phase1",                       test_v2_phase1),
+        ("test_v2_phase2",                       test_v2_phase2),
         ("test_strict_load_mismatch_v1_to_v2",   test_strict_load_mismatch_v1_to_v2),
         ("test_strict_load_mismatch_v2_to_v1",   test_strict_load_mismatch_v2_to_v1),
     ]

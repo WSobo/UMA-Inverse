@@ -83,6 +83,16 @@ class UMAInverse(nn.Module):
                 f"unknown ligand_featurizer={self.ligand_featurizer!r}; "
                 "expected 'onehot6' or 'atomic_number_embedding'"
             )
+        # v2 phase 2: purely informational — the model sees only residue_coords
+        # and doesn't care which backbone atom produced them. Stored so the
+        # checkpoint manifest and debug dumps can report the anchor used at
+        # training time; the authoritative value still lives under data.*.
+        self.residue_anchor = str(config.get("residue_anchor", "ca"))
+        if self.residue_anchor not in ("ca", "cb"):
+            raise ValueError(
+                f"unknown residue_anchor={self.residue_anchor!r}; "
+                "expected 'ca' or 'cb'"
+            )
         self.node_norm = nn.LayerNorm(node_dim)
 
         # Relative position encoding for the residue-residue pair tensor.

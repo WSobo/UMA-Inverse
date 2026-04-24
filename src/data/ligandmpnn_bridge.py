@@ -109,6 +109,30 @@ def _encode_ligand_atomic_numbers(y_t: torch.Tensor) -> torch.Tensor:
     return y_t.long()
 
 
+def _construct_virtual_cb(x: torch.Tensor) -> torch.Tensor:
+    """Construct virtual Cβ positions from N, Cα, C using ProteinMPNN's formula.
+
+    Coefficients match LigandMPNN/data_utils.py:821-824 and place virtual Cβ
+    at ~1.52 Å from Cα — the canonical covalent C-C bond length. The
+    construction is analytic, so it works for glycine (where a real Cβ
+    doesn't exist) without a special case; the placed virtual Cβ is where
+    Cβ *would* be if the residue weren't Gly.
+
+    Args:
+        x: ``[L, 4, 3]`` backbone coordinates in order N, Cα, C, O.
+
+    Returns:
+        ``[L, 3]`` virtual Cβ coordinates.
+    """
+    n = x[:, 0, :]
+    ca = x[:, 1, :]
+    c = x[:, 2, :]
+    b = ca - n
+    c_vec = c - ca
+    a = torch.linalg.cross(b, c_vec, dim=-1)
+    return -0.58273431 * a + 0.56802827 * b - 0.54067466 * c_vec + ca
+
+
 def _select_residue_crop(
     residue_coords: torch.Tensor,
     ligand_coords: torch.Tensor,
@@ -152,6 +176,7 @@ def load_example_from_pdb(
     include_zero_occupancy: bool = False,
     return_residue_ids: bool = False,
     ligand_featurizer: str = "onehot6",
+    residue_anchor: str = "ca",
 ) -> Dict[str, object]:
     """Featurize a single PDB file into model-ready tensors.
 
@@ -183,11 +208,18 @@ def load_example_from_pdb(
             embedding path emits ``[M]`` int64 atomic numbers under key
             ``ligand_atomic_numbers``. Mutually exclusive — only one of the
             two keys is present in the returned dict.
+        residue_anchor: ``"ca"`` (v1 default) or ``"cb"`` (v2 phase 2).
+            Controls which atom is used as the per-residue anchor for
+            ``residue_coords``. ``"ca"`` emits the Cα position unchanged;
+            ``"cb"`` emits a virtual Cβ constructed analytically from
+            N/Cα/C — places the residue anchor closer to the sidechain,
+            which matters for distance-based pair features between residues
+            and ligand atoms.
 
     Returns:
         Dict with keys:
 
-        * ``residue_coords``         ``[L, 3]``   Cα coordinates
+        * ``residue_coords``         ``[L, 3]``   Cα or virtual Cβ coordinates
         * ``residue_features``       ``[L, 6]``   sin/cos backbone dihedrals
         * ``residue_mask``           ``[L]``       all-True (valid residues only)
         * ``sequence``               ``[L]``       int64 AA token indices
@@ -196,12 +228,17 @@ def load_example_from_pdb(
         * ``ligand_features``        ``[M, 6]``    element one-hot (onehot6 only)
         * ``ligand_atomic_numbers``  ``[M]``        int64 atomic numbers (embedding only)
         * ``ligand_mask``            ``[M]``       all-True (valid ligand atoms only)
+        * ``residue_anchor_atom``    ``str``        ``"ca"`` or ``"cb"`` (traceability)
         * ``residue_ids``            ``List[str]`` (when ``return_residue_ids=True``)
     """
     if ligand_featurizer not in ("onehot6", "atomic_number_embedding"):
         raise ValueError(
             f"unknown ligand_featurizer={ligand_featurizer!r}; "
             "expected 'onehot6' or 'atomic_number_embedding'"
+        )
+    if residue_anchor not in ("ca", "cb"):
+        raise ValueError(
+            f"unknown residue_anchor={residue_anchor!r}; expected 'ca' or 'cb'"
         )
     parsed = parse_pdb(
         pdb_path,
@@ -215,8 +252,16 @@ def load_example_from_pdb(
     residue_mask = parsed["mask"].bool() # [L]
     chain_mask   = parsed["chain_mask"]  # [L]
 
+    # Per-residue anchor selection — Cα (v1) vs virtual Cβ (v2 phase 2).
+    # Cβ is constructed before masking so the [L, 3] shape matches downstream
+    # slicing, then masked the same way Cα was before.
+    if residue_anchor == "ca":
+        anchor_coords = x[:, 1, :]
+    else:  # "cb" — validated at function entry
+        anchor_coords = _construct_virtual_cb(x)
+
     # Mask down to valid (Cα-present) residues
-    residue_coords   = x[:, 1, :][residue_mask]               # [L_valid, 3]
+    residue_coords   = anchor_coords[residue_mask]             # [L_valid, 3]
     residue_features = _compute_backbone_dihedrals(x)[residue_mask]  # [L_valid, 6]
     sequence         = parsed["S"][residue_mask].long()        # [L_valid]
     design_mask      = chain_mask[residue_mask].bool()         # [L_valid]
@@ -284,13 +329,17 @@ def load_example_from_pdb(
         residue_ids_valid = [residue_ids_valid[i] for i in keep_indices]
 
     output: Dict[str, object] = {
-        "residue_coords":   residue_coords.float(),
-        "residue_features": residue_features.float(),
-        "residue_mask":     torch.ones(residue_coords.shape[0], dtype=torch.bool, device=device),
-        "sequence":         sequence.long(),
-        "design_mask":      design_mask.bool(),
-        "ligand_coords":    ligand_coords.float(),
-        "ligand_mask":      torch.ones(ligand_coords.shape[0], dtype=torch.bool, device=device),
+        "residue_coords":      residue_coords.float(),
+        "residue_features":    residue_features.float(),
+        "residue_mask":        torch.ones(residue_coords.shape[0], dtype=torch.bool, device=device),
+        "sequence":            sequence.long(),
+        "design_mask":         design_mask.bool(),
+        "ligand_coords":       ligand_coords.float(),
+        "ligand_mask":         torch.ones(ligand_coords.shape[0], dtype=torch.bool, device=device),
+        # Traceability — downstream code can verify which anchor the coords
+        # came from without re-reading the config. Not a tensor, so it is
+        # dropped by collate_batch (which only stacks known tensor keys).
+        "residue_anchor_atom": residue_anchor,
     }
     if ligand_featurizer == "onehot6":
         output["ligand_features"] = ligand_repr_tensor.float()

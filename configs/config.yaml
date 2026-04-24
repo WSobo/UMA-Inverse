@@ -47,6 +47,7 @@ model:
   # v2 featurizer flags mirror data.* — the data layer is the authoritative
   # source of truth; the model reads the same value so train/infer stay aligned.
   ligand_featurizer: ${data.ligand_featurizer}
+  residue_anchor: ${data.residue_anchor}
 
 data:
   batch_size: 8
@@ -59,6 +60,12 @@ data:
   # "atomic_number_embedding" = per-element learnable embedding over atomic
   # numbers. See scripts/smoke_test_v2.py for forward-path coverage.
   ligand_featurizer: onehot6
+  # v2 phase 2 — "ca" = v1 default (Cα is the residue anchor for pair-tensor
+  # distance). "cb" = virtual Cβ via the ProteinMPNN formula (N, CA, C → Cβ)
+  # so residue-ligand distances are measured from the sidechain stub rather
+  # than the backbone. Model is agnostic; flag is purely for the data layer
+  # and is mirrored into model.* for manifest traceability.
+  residue_anchor: ca
 
 inference:
   temperature: 0.1

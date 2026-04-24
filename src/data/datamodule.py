@@ -80,6 +80,7 @@ class UMAInverseDataset(Dataset):
         cutoff_for_score: float,
         max_total_nodes: int,
         ligand_featurizer: str = "onehot6",
+        residue_anchor: str = "ca",
     ) -> None:
         self.pdb_dir = pdb_dir
         self.processed_dir = processed_dir
@@ -87,6 +88,7 @@ class UMAInverseDataset(Dataset):
         self.cutoff_for_score = cutoff_for_score
         self.max_total_nodes = max_total_nodes
         self.ligand_featurizer = ligand_featurizer
+        self.residue_anchor = residue_anchor
 
         ids = load_json_ids(json_path)
         self.pdb_ids = [
@@ -131,12 +133,19 @@ class UMAInverseDataset(Dataset):
         if os.path.exists(processed_path):
             try:
                 item = torch.load(processed_path, map_location="cpu", weights_only=True)
-                if cache_key in item:
+                # Featurizer must match — old caches lack ligand_atomic_numbers.
+                # Residue anchor must match too: absent "residue_anchor_atom"
+                # means the cache predates phase 2 and was built with "ca";
+                # falling through to PDB keeps the semantic of residue_coords
+                # honest when the user switches to "cb".
+                cached_anchor = item.get("residue_anchor_atom", "ca")
+                if cache_key in item and cached_anchor == self.residue_anchor:
                     item = _apply_runtime_crop(item, self.max_total_nodes)
                     item["pdb_id"] = pdb_id
                     return item
-                # Cache exists but was built with a different featurizer — fall
-                # through to the slow PDB path rather than silently mismatching.
+                # Cache exists but was built with a different featurizer or
+                # anchor — fall through to the slow PDB path rather than
+                # silently mismatching.
             except (RuntimeError, EOFError, OSError) as e:
                 logger.warning("Corrupted cache for %s (%s) — falling back to PDB", pdb_id, e)
                 _log_failed_pdb(pdb_id, f"cache_corrupt:{e}")
@@ -155,6 +164,7 @@ class UMAInverseDataset(Dataset):
                 cutoff_for_score=self.cutoff_for_score,
                 max_total_nodes=self.max_total_nodes,
                 ligand_featurizer=self.ligand_featurizer,
+                residue_anchor=self.residue_anchor,
             )
         except (ValueError, OSError, RuntimeError) as e:
             logger.warning("Failed to featurize %s (%s) — sampling replacement", pdb_id, e)
@@ -242,6 +252,7 @@ class UMAInverseDataModule(pl.LightningDataModule):
         max_total_nodes: int = 384,
         processed_dir: Optional[str] = None,
         ligand_featurizer: str = "onehot6",
+        residue_anchor: str = "ca",
     ) -> None:
         super().__init__()
         self.train_json = train_json
@@ -255,6 +266,7 @@ class UMAInverseDataModule(pl.LightningDataModule):
         self.max_total_nodes = max_total_nodes
         self.processed_dir = processed_dir or os.path.join(PROJECT_ROOT, "data", "processed")
         self.ligand_featurizer = ligand_featurizer
+        self.residue_anchor = residue_anchor
 
         self.train_dataset: Optional[UMAInverseDataset] = None
         self.valid_dataset: Optional[UMAInverseDataset] = None
@@ -268,6 +280,7 @@ class UMAInverseDataModule(pl.LightningDataModule):
             cutoff_for_score=self.cutoff_for_score,
             max_total_nodes=self.max_total_nodes,
             ligand_featurizer=self.ligand_featurizer,
+            residue_anchor=self.residue_anchor,
         )
 
     def setup(self, stage: Optional[str] = None) -> None:
