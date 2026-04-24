@@ -48,6 +48,7 @@ model:
   # source of truth; the model reads the same value so train/infer stay aligned.
   ligand_featurizer: ${data.ligand_featurizer}
   residue_anchor: ${data.residue_anchor}
+  pair_distance_atoms: ${data.pair_distance_atoms}
 
 data:
   batch_size: 8
@@ -66,6 +67,14 @@ data:
   # than the backbone. Model is agnostic; flag is purely for the data layer
   # and is mirrored into model.* for manifest traceability.
   residue_anchor: ca
+  # v2 phase 3 — "anchor_only" = v1 default (single-atom pairwise distance
+  # over the concatenated residue+ligand coordinate tensor). "backbone_full"
+  # = the residue-residue [L,L] block uses 5 backbone-pair distances
+  # (Cα-Cα, Cα-N, Cα-C, N-O, O-C) stacked and re-projected; the [L,M],
+  # [M,L], [M,M] blocks stay single-atom (they involve ligand atoms, for
+  # which there is no backbone analogue). Phase 2 still governs the
+  # residue-ligand anchor even when this flag is on.
+  pair_distance_atoms: anchor_only
 
 inference:
   temperature: 0.1

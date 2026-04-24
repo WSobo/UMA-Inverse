@@ -59,6 +59,9 @@ class StructureContext:
         residue_mask: ``[1, L]`` bool — True for every parsed residue (never
             False in the inference path; kept for interface parity).
         residue_count: L (cached to avoid shape inspection).
+        residue_backbone_coords: ``[1, L, 4, 3]`` N/Cα/C/O coords used by
+            the multi-atom pair-distance path (v2 phase 3). ``None`` when
+            the session is configured for ``pair_distance_atoms="anchor_only"``.
         pdb_path: Original path the structure was loaded from.
     """
 
@@ -75,6 +78,7 @@ class StructureContext:
     residue_mask: torch.Tensor
     residue_count: int
     pdb_path: str
+    residue_backbone_coords: torch.Tensor | None = None
     device: torch.device = field(default_factory=lambda: torch.device("cpu"))
 
     @property
@@ -113,11 +117,12 @@ class InferenceSession:
         self.config = config
         self.device = device
         self.checkpoint_path = checkpoint_path
-        # v2 phase 1/2: data layer is the authoritative source; the model
+        # v2 phase 1/2/3: data layer is the authoritative source; the model
         # reads the same values via OmegaConf interpolation.
         data_section = config.data if "data" in config else {}
         self.ligand_featurizer = str(data_section.get("ligand_featurizer", "onehot6"))
         self.residue_anchor = str(data_section.get("residue_anchor", "ca"))
+        self.pair_distance_atoms = str(data_section.get("pair_distance_atoms", "anchor_only"))
 
     # ── Factory ───────────────────────────────────────────────────────────────
 
@@ -226,6 +231,7 @@ class InferenceSession:
             return_residue_ids=True,
             ligand_featurizer=self.ligand_featurizer,
             residue_anchor=self.residue_anchor,
+            return_backbone_coords=(self.pair_distance_atoms == "backbone_full"),
         )
 
         residue_ids: list[str] = example["residue_ids"]  # type: ignore[assignment]
@@ -258,6 +264,11 @@ class InferenceSession:
         ligand_mask = example["ligand_mask"].bool().to(device).unsqueeze(0)
         native_sequence = example["sequence"].to(device).long()
         design_mask = example["design_mask"].bool().to(device)
+        residue_backbone_coords: torch.Tensor | None = None
+        if self.pair_distance_atoms == "backbone_full":
+            residue_backbone_coords = (
+                example["residue_backbone_coords"].to(device).unsqueeze(0)
+            )
 
         # Featurizer-specific ligand tensor. For mask_ligand: the onehot path
         # zeroes the feature vector directly; the embedding path maps every
@@ -292,6 +303,7 @@ class InferenceSession:
             coords=coords_all,
             pair_mask=pair_mask,
             residue_count=residue_count,
+            residue_backbone_coords=residue_backbone_coords,
         )
         z = model.encoder(z, pair_mask.to(dtype=z.dtype))
 
@@ -319,6 +331,7 @@ class InferenceSession:
             residue_mask=residue_mask,
             residue_count=residue_count,
             pdb_path=str(pdb_path),
+            residue_backbone_coords=residue_backbone_coords,
             device=device,
         )
 

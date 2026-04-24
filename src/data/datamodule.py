@@ -60,7 +60,7 @@ def _apply_runtime_crop(item: Dict[str, torch.Tensor], max_total_nodes: int) -> 
     else:
         keep = torch.arange(max_residues, device=residue_coords.device)
 
-    return {
+    out = {
         **item,
         "residue_coords":   item["residue_coords"][keep],
         "residue_features": item["residue_features"][keep],
@@ -68,6 +68,11 @@ def _apply_runtime_crop(item: Dict[str, torch.Tensor], max_total_nodes: int) -> 
         "sequence":         item["sequence"][keep],
         "design_mask":      item["design_mask"][keep],
     }
+    # Phase 3: crop backbone coords with the same selection so they stay
+    # aligned with residue_coords/residue_features.
+    if "residue_backbone_coords" in item:
+        out["residue_backbone_coords"] = item["residue_backbone_coords"][keep]
+    return out
 
 
 class UMAInverseDataset(Dataset):
@@ -81,6 +86,7 @@ class UMAInverseDataset(Dataset):
         max_total_nodes: int,
         ligand_featurizer: str = "onehot6",
         residue_anchor: str = "ca",
+        return_backbone_coords: bool = False,
     ) -> None:
         self.pdb_dir = pdb_dir
         self.processed_dir = processed_dir
@@ -89,6 +95,7 @@ class UMAInverseDataset(Dataset):
         self.max_total_nodes = max_total_nodes
         self.ligand_featurizer = ligand_featurizer
         self.residue_anchor = residue_anchor
+        self.return_backbone_coords = return_backbone_coords
 
         ids = load_json_ids(json_path)
         self.pdb_ids = [
@@ -137,15 +144,26 @@ class UMAInverseDataset(Dataset):
                 # Residue anchor must match too: absent "residue_anchor_atom"
                 # means the cache predates phase 2 and was built with "ca";
                 # falling through to PDB keeps the semantic of residue_coords
-                # honest when the user switches to "cb".
+                # honest when the user switches to "cb". Backbone coords:
+                # when the caller asks for them (phase 3) but the cache was
+                # built without, fall through as well.
                 cached_anchor = item.get("residue_anchor_atom", "ca")
-                if cache_key in item and cached_anchor == self.residue_anchor:
+                backbone_ok = (
+                    (not self.return_backbone_coords)
+                    or ("residue_backbone_coords" in item)
+                )
+                if (
+                    cache_key in item
+                    and cached_anchor == self.residue_anchor
+                    and backbone_ok
+                ):
                     item = _apply_runtime_crop(item, self.max_total_nodes)
                     item["pdb_id"] = pdb_id
                     return item
-                # Cache exists but was built with a different featurizer or
-                # anchor — fall through to the slow PDB path rather than
-                # silently mismatching.
+                # Cache exists but was built with a different featurizer,
+                # anchor, or without the backbone coords the caller wants —
+                # fall through to the slow PDB path rather than silently
+                # mismatching.
             except (RuntimeError, EOFError, OSError) as e:
                 logger.warning("Corrupted cache for %s (%s) — falling back to PDB", pdb_id, e)
                 _log_failed_pdb(pdb_id, f"cache_corrupt:{e}")
@@ -165,6 +183,7 @@ class UMAInverseDataset(Dataset):
                 max_total_nodes=self.max_total_nodes,
                 ligand_featurizer=self.ligand_featurizer,
                 residue_anchor=self.residue_anchor,
+                return_backbone_coords=self.return_backbone_coords,
             )
         except (ValueError, OSError, RuntimeError) as e:
             logger.warning("Failed to featurize %s (%s) — sampling replacement", pdb_id, e)
@@ -200,16 +219,37 @@ def _pad_1d(
     return out
 
 
+def _pad_3d(
+    items: List[torch.Tensor],
+    max_len: int,
+    feat_dim_1: int,
+    feat_dim_2: int,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    """Pad a list of [L_i, D1, D2] tensors into [B, max_len, D1, D2].
+
+    Used for the optional residue_backbone_coords [L, 4, 3] tensor that
+    phase 3 emits when the model computes multi-atom pair distances.
+    """
+    out = torch.zeros((len(items), max_len, feat_dim_1, feat_dim_2), dtype=dtype)
+    for i, t in enumerate(items):
+        if t.shape[0] > 0:
+            out[i, : t.shape[0], :, :] = t
+    return out
+
+
 def collate_batch(batch: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
     """Pad a list of variable-length samples into a single batch dict.
 
-    Ligand featurizer is detected per-batch from the keys present in the
-    first item. All items in a batch must agree on the featurizer.
+    Ligand featurizer and backbone-coords presence are detected per-batch
+    from the keys present in the first item. All items in a batch must
+    agree on the featurizer / backbone flag.
     """
     max_res = max(item["residue_coords"].shape[0] for item in batch)
     max_lig = max(item["ligand_coords"].shape[0] for item in batch)
 
     uses_embedding = "ligand_atomic_numbers" in batch[0]
+    uses_backbone = "residue_backbone_coords" in batch[0]
 
     out = {
         "residue_coords":   _pad_2d([b["residue_coords"]   for b in batch], max_res, 3, torch.float32),
@@ -233,6 +273,10 @@ def collate_batch(batch: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tenso
         out["ligand_features"] = _pad_2d(
             [b["ligand_features"] for b in batch], max_lig, 6, torch.float32,
         )
+    if uses_backbone:
+        out["residue_backbone_coords"] = _pad_3d(
+            [b["residue_backbone_coords"] for b in batch], max_res, 4, 3, torch.float32,
+        )
     return out
 
 
@@ -253,6 +297,7 @@ class UMAInverseDataModule(pl.LightningDataModule):
         processed_dir: Optional[str] = None,
         ligand_featurizer: str = "onehot6",
         residue_anchor: str = "ca",
+        return_backbone_coords: bool = False,
     ) -> None:
         super().__init__()
         self.train_json = train_json
@@ -267,6 +312,7 @@ class UMAInverseDataModule(pl.LightningDataModule):
         self.processed_dir = processed_dir or os.path.join(PROJECT_ROOT, "data", "processed")
         self.ligand_featurizer = ligand_featurizer
         self.residue_anchor = residue_anchor
+        self.return_backbone_coords = return_backbone_coords
 
         self.train_dataset: Optional[UMAInverseDataset] = None
         self.valid_dataset: Optional[UMAInverseDataset] = None
@@ -281,6 +327,7 @@ class UMAInverseDataModule(pl.LightningDataModule):
             max_total_nodes=self.max_total_nodes,
             ligand_featurizer=self.ligand_featurizer,
             residue_anchor=self.residue_anchor,
+            return_backbone_coords=self.return_backbone_coords,
         )
 
     def setup(self, stage: Optional[str] = None) -> None:

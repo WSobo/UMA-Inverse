@@ -35,6 +35,7 @@ FIXTURE_PDB = PROJECT_ROOT / "tests" / "fixtures" / "1bc8.pdb"
 def _small_config(
     ligand_featurizer: str = "onehot6",
     residue_anchor: str = "ca",
+    pair_distance_atoms: str = "anchor_only",
 ) -> dict:
     """Return a tiny UMAInverse config that runs quickly on CPU.
 
@@ -58,6 +59,7 @@ def _small_config(
         "ar_num_heads": 4,
         "ligand_featurizer": ligand_featurizer,
         "residue_anchor": residue_anchor,
+        "pair_distance_atoms": pair_distance_atoms,
     }
 
 
@@ -192,6 +194,74 @@ def test_v2_phase2() -> None:
     assert torch.isfinite(logits).all(), "v2 phase-2 logits contain NaN or Inf"
 
 
+def test_v2_phase3() -> None:
+    """Multi-atom backbone distances replace the [L,L] block of the pair tensor."""
+    example = load_example_from_pdb(
+        str(FIXTURE_PDB), max_total_nodes=256,
+        return_backbone_coords=True,
+    )
+    assert "residue_backbone_coords" in example, \
+        "return_backbone_coords=True must emit residue_backbone_coords"
+    bb = example["residue_backbone_coords"]
+    assert bb.dtype == torch.float32, f"backbone coords should be float32, got {bb.dtype}"
+    assert bb.dim() == 3 and bb.shape[1:] == (4, 3), \
+        f"backbone coords should be [L, 4, 3], got {tuple(bb.shape)}"
+    # Cα coords of the backbone tensor must match residue_coords when anchor=ca.
+    # Matches the invariant relied on by _init_pair's slice replacement.
+    assert torch.allclose(bb[:, 1, :], example["residue_coords"], atol=1e-5), \
+        "residue_backbone_coords[:, 1, :] (Cα) does not match residue_coords (anchor=ca)"
+
+    batch = _build_batch(example)
+    assert "residue_backbone_coords" in batch, \
+        "batched backbone coords must survive _build_batch"
+    L = batch["residue_coords"].shape[1]
+    assert batch["residue_backbone_coords"].shape == (1, L, 4, 3), \
+        f"expected batched backbone coords [1, {L}, 4, 3], got "\
+        f"{tuple(batch['residue_backbone_coords'].shape)}"
+
+    model = UMAInverse(_small_config(
+        "onehot6", "ca", "backbone_full",
+    )).eval()
+    assert hasattr(model, "rbf_proj_multi"), \
+        "backbone_full model must instantiate rbf_proj_multi"
+    assert model.rbf_proj_multi.in_features == 5 * 16, \
+        f"rbf_proj_multi should take 5*num_rbf=80, got {model.rbf_proj_multi.in_features}"
+    with torch.no_grad():
+        out = model(batch)
+    logits = out["logits"]
+    pair = out["pair_repr"]
+    assert logits.shape == (1, L, 21), \
+        f"expected logits (1, {L}, 21), got {tuple(logits.shape)}"
+    assert torch.isfinite(logits).all(), "v2 phase-3 logits contain NaN or Inf"
+    assert torch.isfinite(pair).all(), "v2 phase-3 pair tensor contains NaN or Inf"
+    assert pair.abs().sum().item() > 0, "pair tensor is identically zero"
+
+
+def test_v2_full() -> None:
+    """All three v2 flags simultaneously: atomic-number embedding + Cβ + backbone_full."""
+    example = load_example_from_pdb(
+        str(FIXTURE_PDB), max_total_nodes=256,
+        ligand_featurizer="atomic_number_embedding",
+        residue_anchor="cb",
+        return_backbone_coords=True,
+    )
+    assert "ligand_atomic_numbers" in example
+    assert "residue_backbone_coords" in example
+    assert example.get("residue_anchor_atom") == "cb"
+
+    batch = _build_batch(example)
+    L = batch["residue_coords"].shape[1]
+    model = UMAInverse(_small_config(
+        "atomic_number_embedding", "cb", "backbone_full",
+    )).eval()
+    with torch.no_grad():
+        out = model(batch)
+    logits = out["logits"]
+    assert logits.shape == (1, L, 21), \
+        f"expected logits (1, {L}, 21), got {tuple(logits.shape)}"
+    assert torch.isfinite(logits).all(), "v2-full logits contain NaN or Inf"
+
+
 def test_strict_load_mismatch_v1_to_v2() -> None:
     """v1 checkpoint state_dict must NOT load into a v2 model under strict=True."""
     v1_model = UMAInverse(_small_config("onehot6"))
@@ -247,6 +317,8 @@ def main() -> int:
         ("test_v1_path",                         test_v1_path),
         ("test_v2_phase1",                       test_v2_phase1),
         ("test_v2_phase2",                       test_v2_phase2),
+        ("test_v2_phase3",                       test_v2_phase3),
+        ("test_v2_full",                         test_v2_full),
         ("test_strict_load_mismatch_v1_to_v2",   test_strict_load_mismatch_v1_to_v2),
         ("test_strict_load_mismatch_v2_to_v1",   test_strict_load_mismatch_v2_to_v1),
     ]

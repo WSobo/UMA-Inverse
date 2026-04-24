@@ -177,6 +177,7 @@ def load_example_from_pdb(
     return_residue_ids: bool = False,
     ligand_featurizer: str = "onehot6",
     residue_anchor: str = "ca",
+    return_backbone_coords: bool = False,
 ) -> Dict[str, object]:
     """Featurize a single PDB file into model-ready tensors.
 
@@ -215,21 +216,27 @@ def load_example_from_pdb(
             N/Cα/C — places the residue anchor closer to the sidechain,
             which matters for distance-based pair features between residues
             and ligand atoms.
+        return_backbone_coords: When True, also emit ``residue_backbone_coords``
+            (``[L, 4, 3]``, ordered N/Cα/C/O) so the model can compute
+            multi-atom backbone distances in its pair tensor (v2 phase 3).
+            False by default to avoid the extra per-sample memory when the
+            model is configured for anchor-only pair distances.
 
     Returns:
         Dict with keys:
 
-        * ``residue_coords``         ``[L, 3]``   Cα or virtual Cβ coordinates
-        * ``residue_features``       ``[L, 6]``   sin/cos backbone dihedrals
-        * ``residue_mask``           ``[L]``       all-True (valid residues only)
-        * ``sequence``               ``[L]``       int64 AA token indices
-        * ``design_mask``            ``[L]``       bool — which residues to design
-        * ``ligand_coords``          ``[M, 3]``    ligand heavy-atom coords
-        * ``ligand_features``        ``[M, 6]``    element one-hot (onehot6 only)
-        * ``ligand_atomic_numbers``  ``[M]``        int64 atomic numbers (embedding only)
-        * ``ligand_mask``            ``[M]``       all-True (valid ligand atoms only)
-        * ``residue_anchor_atom``    ``str``        ``"ca"`` or ``"cb"`` (traceability)
-        * ``residue_ids``            ``List[str]`` (when ``return_residue_ids=True``)
+        * ``residue_coords``           ``[L, 3]``     Cα or virtual Cβ coordinates
+        * ``residue_features``         ``[L, 6]``     sin/cos backbone dihedrals
+        * ``residue_backbone_coords``  ``[L, 4, 3]``  N/Cα/C/O (when ``return_backbone_coords``)
+        * ``residue_mask``             ``[L]``         all-True (valid residues only)
+        * ``sequence``                 ``[L]``         int64 AA token indices
+        * ``design_mask``              ``[L]``         bool — which residues to design
+        * ``ligand_coords``            ``[M, 3]``      ligand heavy-atom coords
+        * ``ligand_features``          ``[M, 6]``      element one-hot (onehot6 only)
+        * ``ligand_atomic_numbers``    ``[M]``          int64 atomic numbers (embedding only)
+        * ``ligand_mask``              ``[M]``         all-True (valid ligand atoms only)
+        * ``residue_anchor_atom``      ``str``          ``"ca"`` or ``"cb"`` (traceability)
+        * ``residue_ids``              ``List[str]`` (when ``return_residue_ids=True``)
     """
     if ligand_featurizer not in ("onehot6", "atomic_number_embedding"):
         raise ValueError(
@@ -265,6 +272,9 @@ def load_example_from_pdb(
     residue_features = _compute_backbone_dihedrals(x)[residue_mask]  # [L_valid, 6]
     sequence         = parsed["S"][residue_mask].long()        # [L_valid]
     design_mask      = chain_mask[residue_mask].bool()         # [L_valid]
+    residue_backbone_coords: Optional[torch.Tensor] = (
+        x[residue_mask] if return_backbone_coords else None    # [L_valid, 4, 3]
+    )
 
     residue_ids_valid: Optional[List[str]] = None
     if return_residue_ids:
@@ -323,6 +333,8 @@ def load_example_from_pdb(
     residue_features = residue_features[keep_idx]
     sequence         = sequence[keep_idx]
     design_mask      = design_mask[keep_idx]
+    if residue_backbone_coords is not None:
+        residue_backbone_coords = residue_backbone_coords[keep_idx]
 
     if residue_ids_valid is not None:
         keep_indices = keep_idx.tolist()
@@ -345,6 +357,8 @@ def load_example_from_pdb(
         output["ligand_features"] = ligand_repr_tensor.float()
     else:  # "atomic_number_embedding"
         output["ligand_atomic_numbers"] = ligand_repr_tensor.long()
+    if residue_backbone_coords is not None:
+        output["residue_backbone_coords"] = residue_backbone_coords.float()
     if residue_ids_valid is not None:
         output["residue_ids"] = residue_ids_valid
     return output

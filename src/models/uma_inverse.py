@@ -109,11 +109,27 @@ class UMAInverse(nn.Module):
 
         self.pair_i = nn.Linear(node_dim, pair_dim, bias=False)
         self.pair_j = nn.Linear(node_dim, pair_dim, bias=False)
+        num_rbf = int(config.get("num_rbf", 32))
         self.rbf = RBFEmbedding(
-            num_rbf=int(config.get("num_rbf", 32)),
+            num_rbf=num_rbf,
             max_distance=float(config.get("max_distance", 24.0)),
         )
-        self.rbf_proj = nn.Linear(int(config.get("num_rbf", 32)), pair_dim, bias=False)
+        self.rbf_proj = nn.Linear(num_rbf, pair_dim, bias=False)
+
+        # v2 phase 3: when backbone_full is selected, the residue-residue
+        # [L,L] block of the pair tensor is driven by 5 backbone-atom-pair
+        # distances (Cα-Cα, Cα-N, Cα-C, N-O, O-C) rather than a single
+        # anchor-to-anchor cdist. The [L,M]/[M,L]/[M,M] blocks still use the
+        # single-atom distance — ligand atoms have no backbone analogue, so
+        # phase 2's residue anchor still governs the residue-ligand side.
+        self.pair_distance_atoms = str(config.get("pair_distance_atoms", "anchor_only"))
+        if self.pair_distance_atoms == "backbone_full":
+            self.rbf_proj_multi = nn.Linear(5 * num_rbf, pair_dim, bias=False)
+        elif self.pair_distance_atoms != "anchor_only":
+            raise ValueError(
+                f"unknown pair_distance_atoms={self.pair_distance_atoms!r}; "
+                "expected 'anchor_only' or 'backbone_full'"
+            )
 
         self.encoder = PairMixerEncoder(
             num_blocks=int(config.get("num_pairmixer_blocks", 6)),
@@ -164,7 +180,12 @@ class UMAInverse(nn.Module):
         )
 
     def _init_pair(
-        self, node_repr: Tensor, coords: Tensor, pair_mask: Tensor, residue_count: int
+        self,
+        node_repr: Tensor,
+        coords: Tensor,
+        pair_mask: Tensor,
+        residue_count: int,
+        residue_backbone_coords: Optional[Tensor] = None,
     ) -> Tensor:
         node_i = self.pair_i(node_repr).unsqueeze(2)
         node_j = self.pair_j(node_repr).unsqueeze(1)
@@ -175,6 +196,47 @@ class UMAInverse(nn.Module):
             dist = torch.clamp(dist + noise, min=0.0)
 
         rbf = self.rbf_proj(self.rbf(dist).to(node_repr.dtype))
+
+        # Phase 3: replace the [L, L] residue-residue block of the single-atom
+        # RBF with a multi-atom RBF computed from 5 backbone pair distances.
+        # [L, M]/[M, L]/[M, M] blocks stay single-atom (ligand atoms have no
+        # backbone). The single-atom anchor-to-anchor block inside [L, L] is
+        # discarded — it's redundant with the Cα-Cα entry of the multi-atom
+        # stack when residue_anchor="ca", and a stale distance when anchor="cb".
+        if self.pair_distance_atoms == "backbone_full":
+            if residue_backbone_coords is None:
+                raise ValueError(
+                    "pair_distance_atoms='backbone_full' requires "
+                    "residue_backbone_coords to be passed into _init_pair "
+                    "(set data.return_backbone_coords=True upstream)."
+                )
+            bb = residue_backbone_coords.float()
+            n_at  = bb[:, :, 0, :]
+            ca_at = bb[:, :, 1, :]
+            c_at  = bb[:, :, 2, :]
+            o_at  = bb[:, :, 3, :]
+            pair_dists = [
+                torch.cdist(ca_at, ca_at),  # Cα-Cα
+                torch.cdist(ca_at, n_at),   # Cα-N
+                torch.cdist(ca_at, c_at),   # Cα-C
+                torch.cdist(n_at,  o_at),   # N-O
+                torch.cdist(o_at,  c_at),   # O-C
+            ]
+            if self.training and self.thermal_noise_std > 0.0:
+                pair_dists = [
+                    torch.clamp(
+                        d + torch.randn_like(d) * self.thermal_noise_std, min=0.0
+                    )
+                    for d in pair_dists
+                ]
+            rbf_stack = torch.cat(
+                [self.rbf(d).to(node_repr.dtype) for d in pair_dists], dim=-1,
+            )  # [B, L, L, 5*num_rbf]
+            multi_rbf = self.rbf_proj_multi(rbf_stack)  # [B, L, L, pair_dim]
+            # Replace the [L, L] slice. Clone first so autograd doesn't see an
+            # in-place modification of the earlier linear-projection output.
+            rbf = rbf.clone()
+            rbf[:, :residue_count, :residue_count, :] = multi_rbf
 
         # Relative position bias: clamp (i-j) to [-relpos_max, +relpos_max],
         # reserve the last bin for any pair involving a ligand atom.
@@ -281,11 +343,16 @@ class UMAInverse(nn.Module):
         node_mask = torch.cat([residue_mask, ligand_mask], dim=1)
 
         pair_mask = node_mask[:, :, None] & node_mask[:, None, :]
+        residue_backbone_coords = (
+            batch.get("residue_backbone_coords")
+            if self.pair_distance_atoms == "backbone_full" else None
+        )
         z = self._init_pair(
             node_repr=node_repr,
             coords=coords,
             pair_mask=pair_mask,
             residue_count=residue_count,
+            residue_backbone_coords=residue_backbone_coords,
         )
         z = self.encoder(z, pair_mask.to(dtype=z.dtype))
 
