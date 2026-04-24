@@ -116,6 +116,54 @@ class UMAInverseDataset(Dataset):
     def __len__(self) -> int:
         return len(self.pdb_ids)
 
+    def _adapt_cached_item(
+        self, item: Dict[str, torch.Tensor]
+    ) -> Optional[Dict[str, torch.Tensor]]:
+        """Project a cached item onto the currently-configured feature set.
+
+        The preprocessor writes a "union cache" with every v2 key, so we can
+        derive the right feature combination on the fly without re-running
+        preprocess every time a data flag flips. Returns ``None`` when the
+        cached item can't satisfy the current flags (e.g. pre-Phase 4 caches
+        that lack ``residue_backbone_coords`` against a config that needs it).
+        """
+        out = dict(item)
+
+        # If the user wants virtual Cβ and the cache has backbone coords,
+        # derive Cβ and overwrite residue_coords. The cache's residue_coords
+        # is the Cα baseline; residue_backbone_coords[:, 1, :] is identical
+        # to it by construction.
+        if self.residue_anchor == "cb":
+            if "residue_backbone_coords" not in out:
+                return None
+            from .ligandmpnn_bridge import _construct_virtual_cb
+            out["residue_coords"] = _construct_virtual_cb(out["residue_backbone_coords"])
+
+        # Required ligand feature key for the configured featurizer.
+        needed_lig_key = (
+            "ligand_features"
+            if self.ligand_featurizer == "onehot6"
+            else "ligand_atomic_numbers"
+        )
+        if needed_lig_key not in out:
+            return None
+        # Drop the other featurizer key so the batch is clean.
+        other_lig_key = (
+            "ligand_atomic_numbers"
+            if self.ligand_featurizer == "onehot6"
+            else "ligand_features"
+        )
+        out.pop(other_lig_key, None)
+
+        # Backbone coords: keep only when the model will consume them.
+        if self.return_backbone_coords:
+            if "residue_backbone_coords" not in out:
+                return None
+        else:
+            out.pop("residue_backbone_coords", None)
+
+        return out
+
     def __getitem__(self, idx: int, _depth: int = 0) -> Dict[str, torch.Tensor]:
         if _depth >= _MAX_RETRY_DEPTH:
             raise RuntimeError(
@@ -125,45 +173,31 @@ class UMAInverseDataset(Dataset):
 
         pdb_id = self.pdb_ids[idx]
 
-        # Expected ligand feature key for the configured featurizer. Cached
-        # .pt files predate v2 and only carry "ligand_features"; when the
-        # caller asks for the embedding path, skip the cache entirely and
-        # rebuild from PDB so the batch never mixes featurizer conventions.
-        cache_key = (
+        # Required ligand key for the configured featurizer.
+        lig_key_needed = (
             "ligand_features"
             if self.ligand_featurizer == "onehot6"
             else "ligand_atomic_numbers"
         )
 
-        # Fast path: load pre-computed cached tensor
+        # Fast path: load pre-computed cached tensor. Since Phase 4 the
+        # preprocessor emits a "union cache" — every file carries both
+        # ligand_features and ligand_atomic_numbers, residue_backbone_coords,
+        # and residue_anchor_atom="ca". We derive virtual Cβ on-the-fly when
+        # the current config asks for it, so one cache serves any flag combo.
+        # Legacy v1 caches (ligand_features only, no backbone coords) are
+        # still usable when the flags happen to be all-v1.
         processed_path = os.path.join(self.processed_dir, f"{pdb_id}.pt")
         if os.path.exists(processed_path):
             try:
                 item = torch.load(processed_path, map_location="cpu", weights_only=True)
-                # Featurizer must match — old caches lack ligand_atomic_numbers.
-                # Residue anchor must match too: absent "residue_anchor_atom"
-                # means the cache predates phase 2 and was built with "ca";
-                # falling through to PDB keeps the semantic of residue_coords
-                # honest when the user switches to "cb". Backbone coords:
-                # when the caller asks for them (phase 3) but the cache was
-                # built without, fall through as well.
-                cached_anchor = item.get("residue_anchor_atom", "ca")
-                backbone_ok = (
-                    (not self.return_backbone_coords)
-                    or ("residue_backbone_coords" in item)
-                )
-                if (
-                    cache_key in item
-                    and cached_anchor == self.residue_anchor
-                    and backbone_ok
-                ):
+                item = self._adapt_cached_item(item)
+                if item is not None:
                     item = _apply_runtime_crop(item, self.max_total_nodes)
                     item["pdb_id"] = pdb_id
                     return item
-                # Cache exists but was built with a different featurizer,
-                # anchor, or without the backbone coords the caller wants —
-                # fall through to the slow PDB path rather than silently
-                # mismatching.
+                # Cache can't satisfy the current flags (e.g. legacy v1 cache
+                # but config asks for atomic_number_embedding) — fall through.
             except (RuntimeError, EOFError, OSError) as e:
                 logger.warning("Corrupted cache for %s (%s) — falling back to PDB", pdb_id, e)
                 _log_failed_pdb(pdb_id, f"cache_corrupt:{e}")

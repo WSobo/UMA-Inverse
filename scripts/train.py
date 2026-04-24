@@ -110,6 +110,15 @@ def main(cfg: DictConfig) -> None:
         ligand_context_atoms=int(cfg.data.ligand_context_atoms),
         cutoff_for_score=float(cfg.data.cutoff_for_score),
         max_total_nodes=max_total_nodes,
+        # v2 flags — authoritative under data.*; model.* picks them up via
+        # OmegaConf interpolation. return_backbone_coords is derived from
+        # pair_distance_atoms so that the data layer only pays the memory
+        # cost when the model actually needs the backbone tensor.
+        ligand_featurizer=str(cfg.data.get("ligand_featurizer", "onehot6")),
+        residue_anchor=str(cfg.data.get("residue_anchor", "ca")),
+        return_backbone_coords=(
+            str(cfg.data.get("pair_distance_atoms", "anchor_only")) == "backbone_full"
+        ),
     )
 
     # ── LR schedule parameters ─────────────────────────────────────────────────

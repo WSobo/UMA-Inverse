@@ -20,7 +20,12 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from src.data.ligandmpnn_bridge import load_example_from_pdb, load_json_ids, resolve_pdb_path
+from src.data.ligandmpnn_bridge import (
+    _encode_ligand_elements,
+    load_example_from_pdb,
+    load_json_ids,
+    resolve_pdb_path,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -45,12 +50,27 @@ def _process_one(
         return pdb_id, False, "pdb_not_found"
 
     try:
+        # Union cache — emit every v2 key so a single cache serves any
+        # combination of data.* flags without re-preprocessing. Anchor is
+        # cached as Cα (the baseline); Dataset derives virtual Cβ on-the-fly
+        # when data.residue_anchor="cb" is set. Both ligand_features (onehot6)
+        # and ligand_atomic_numbers are written so the featurizer flag is a
+        # pure selection at load time.
         example = load_example_from_pdb(
             pdb_path=path,
             ligand_context_atoms=ligand_context_atoms,
             cutoff_for_score=cutoff_for_score,
             max_total_nodes=max_total_nodes,
+            ligand_featurizer="atomic_number_embedding",
+            residue_anchor="ca",
+            return_backbone_coords=True,
         )
+        # Synthesize the v1 onehot6 features from the atomic numbers so the
+        # cache can serve either featurizer selection. For zero-ligand
+        # structures this returns the expected [0, 6] empty float tensor.
+        example["ligand_features"] = _encode_ligand_elements(
+            example["ligand_atomic_numbers"]
+        ).float()
         torch.save(example, out_path)
         return pdb_id, True, "processed"
     except (ValueError, OSError, RuntimeError) as e:
