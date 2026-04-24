@@ -182,7 +182,12 @@ def parse_pdb(
                     elem_raw = (atom.element or atom.get_name()[0]).strip().upper()
                     if elem_raw in ("H", "D"):
                         continue  # skip hydrogens / deuterium
-                    atomic_num = _ELEM_TO_ATOMIC_NUM.get(elem_raw, 6)  # default C
+                    # Unknown elements fall back to 119 (a sentinel past the
+                    # periodic table). The v1 one-hot path routes 119 into its
+                    # existing "other" bin; the v2 embedding path gets a
+                    # dedicated learnable slot — previously these aliased to
+                    # carbon, giving exotic elements the wrong signal.
+                    atomic_num = _ELEM_TO_ATOMIC_NUM.get(elem_raw, 119)
                     coord = torch.tensor(atom.get_coord(), dtype=torch.float32)
                     ligand_atoms.append((coord, atomic_num))
 

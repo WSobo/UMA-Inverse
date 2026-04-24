@@ -67,7 +67,22 @@ class UMAInverse(nn.Module):
         self.thermal_noise_std = float(config.get("thermal_noise_std", 0.0))
 
         self.residue_in = nn.Linear(residue_input_dim, node_dim)
-        self.ligand_in = nn.Linear(ligand_input_dim, node_dim)
+
+        # v2 phase 1: per-element embedding replaces the 6-bin one-hot linear
+        # projection. Vocab = 120: slot 0 is reserved for padding (so padded
+        # ligand positions in a batch contribute a zero vector), slots 1-118
+        # cover the periodic table, and slot 119 is the "unknown element"
+        # sentinel emitted by pdb_parser.py for exotic atoms.
+        self.ligand_featurizer = str(config.get("ligand_featurizer", "onehot6"))
+        if self.ligand_featurizer == "onehot6":
+            self.ligand_in = nn.Linear(ligand_input_dim, node_dim)
+        elif self.ligand_featurizer == "atomic_number_embedding":
+            self.ligand_in = nn.Embedding(120, node_dim, padding_idx=0)
+        else:
+            raise ValueError(
+                f"unknown ligand_featurizer={self.ligand_featurizer!r}; "
+                "expected 'onehot6' or 'atomic_number_embedding'"
+            )
         self.node_norm = nn.LayerNorm(node_dim)
 
         # Relative position encoding for the residue-residue pair tensor.
@@ -240,13 +255,15 @@ class UMAInverse(nn.Module):
         residue_mask = batch["residue_mask"].bool()
 
         ligand_coords = batch["ligand_coords"]
-        ligand_features = batch["ligand_features"]
         ligand_mask = batch["ligand_mask"].bool()
 
         residue_count = residue_coords.shape[1]
 
         residue_repr = self.residue_in(residue_features)
-        ligand_repr = self.ligand_in(ligand_features)
+        if self.ligand_featurizer == "onehot6":
+            ligand_repr = self.ligand_in(batch["ligand_features"])
+        else:  # "atomic_number_embedding"
+            ligand_repr = self.ligand_in(batch["ligand_atomic_numbers"])
 
         node_repr = torch.cat([residue_repr, ligand_repr], dim=1)
         node_repr = self.node_norm(node_repr)

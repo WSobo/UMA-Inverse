@@ -79,12 +79,14 @@ class UMAInverseDataset(Dataset):
         ligand_context_atoms: int,
         cutoff_for_score: float,
         max_total_nodes: int,
+        ligand_featurizer: str = "onehot6",
     ) -> None:
         self.pdb_dir = pdb_dir
         self.processed_dir = processed_dir
         self.ligand_context_atoms = ligand_context_atoms
         self.cutoff_for_score = cutoff_for_score
         self.max_total_nodes = max_total_nodes
+        self.ligand_featurizer = ligand_featurizer
 
         ids = load_json_ids(json_path)
         self.pdb_ids = [
@@ -114,14 +116,27 @@ class UMAInverseDataset(Dataset):
 
         pdb_id = self.pdb_ids[idx]
 
+        # Expected ligand feature key for the configured featurizer. Cached
+        # .pt files predate v2 and only carry "ligand_features"; when the
+        # caller asks for the embedding path, skip the cache entirely and
+        # rebuild from PDB so the batch never mixes featurizer conventions.
+        cache_key = (
+            "ligand_features"
+            if self.ligand_featurizer == "onehot6"
+            else "ligand_atomic_numbers"
+        )
+
         # Fast path: load pre-computed cached tensor
         processed_path = os.path.join(self.processed_dir, f"{pdb_id}.pt")
         if os.path.exists(processed_path):
             try:
                 item = torch.load(processed_path, map_location="cpu", weights_only=True)
-                item = _apply_runtime_crop(item, self.max_total_nodes)
-                item["pdb_id"] = pdb_id
-                return item
+                if cache_key in item:
+                    item = _apply_runtime_crop(item, self.max_total_nodes)
+                    item["pdb_id"] = pdb_id
+                    return item
+                # Cache exists but was built with a different featurizer — fall
+                # through to the slow PDB path rather than silently mismatching.
             except (RuntimeError, EOFError, OSError) as e:
                 logger.warning("Corrupted cache for %s (%s) — falling back to PDB", pdb_id, e)
                 _log_failed_pdb(pdb_id, f"cache_corrupt:{e}")
@@ -139,6 +154,7 @@ class UMAInverseDataset(Dataset):
                 ligand_context_atoms=self.ligand_context_atoms,
                 cutoff_for_score=self.cutoff_for_score,
                 max_total_nodes=self.max_total_nodes,
+                ligand_featurizer=self.ligand_featurizer,
             )
         except (ValueError, OSError, RuntimeError) as e:
             logger.warning("Failed to featurize %s (%s) — sampling replacement", pdb_id, e)
@@ -175,21 +191,39 @@ def _pad_1d(
 
 
 def collate_batch(batch: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
-    """Pad a list of variable-length samples into a single batch dict."""
+    """Pad a list of variable-length samples into a single batch dict.
+
+    Ligand featurizer is detected per-batch from the keys present in the
+    first item. All items in a batch must agree on the featurizer.
+    """
     max_res = max(item["residue_coords"].shape[0] for item in batch)
     max_lig = max(item["ligand_coords"].shape[0] for item in batch)
 
-    return {
+    uses_embedding = "ligand_atomic_numbers" in batch[0]
+
+    out = {
         "residue_coords":   _pad_2d([b["residue_coords"]   for b in batch], max_res, 3, torch.float32),
         "residue_features": _pad_2d([b["residue_features"] for b in batch], max_res, 6, torch.float32),
         "residue_mask":     _pad_1d([b["residue_mask"].to(torch.bool)  for b in batch], max_res, torch.bool),
         "sequence":         _pad_1d([b["sequence"].to(torch.long)      for b in batch], max_res, torch.long, fill_value=20),
         "design_mask":      _pad_1d([b["design_mask"].to(torch.bool)   for b in batch], max_res, torch.bool),
         "ligand_coords":    _pad_2d([b["ligand_coords"]    for b in batch], max_lig, 3, torch.float32),
-        "ligand_features":  _pad_2d([b["ligand_features"]  for b in batch], max_lig, 6, torch.float32),
         "ligand_mask":      _pad_1d([b["ligand_mask"].to(torch.bool)   for b in batch], max_lig, torch.bool),
         "pdb_id":           [b["pdb_id"] for b in batch],
     }
+    if uses_embedding:
+        # Pad with fill_value=0 so padded slots map to the embedding's
+        # reserved padding_idx (their node vectors are then identically zero
+        # and are suppressed by ligand_mask anyway).
+        out["ligand_atomic_numbers"] = _pad_1d(
+            [b["ligand_atomic_numbers"].to(torch.long) for b in batch],
+            max_lig, torch.long, fill_value=0,
+        )
+    else:
+        out["ligand_features"] = _pad_2d(
+            [b["ligand_features"] for b in batch], max_lig, 6, torch.float32,
+        )
+    return out
 
 
 # ── DataModule ────────────────────────────────────────────────────────────────
@@ -207,6 +241,7 @@ class UMAInverseDataModule(pl.LightningDataModule):
         cutoff_for_score: float = 8.0,
         max_total_nodes: int = 384,
         processed_dir: Optional[str] = None,
+        ligand_featurizer: str = "onehot6",
     ) -> None:
         super().__init__()
         self.train_json = train_json
@@ -219,6 +254,7 @@ class UMAInverseDataModule(pl.LightningDataModule):
         self.cutoff_for_score = cutoff_for_score
         self.max_total_nodes = max_total_nodes
         self.processed_dir = processed_dir or os.path.join(PROJECT_ROOT, "data", "processed")
+        self.ligand_featurizer = ligand_featurizer
 
         self.train_dataset: Optional[UMAInverseDataset] = None
         self.valid_dataset: Optional[UMAInverseDataset] = None
@@ -231,6 +267,7 @@ class UMAInverseDataModule(pl.LightningDataModule):
             ligand_context_atoms=self.ligand_context_atoms,
             cutoff_for_score=self.cutoff_for_score,
             max_total_nodes=self.max_total_nodes,
+            ligand_featurizer=self.ligand_featurizer,
         )
 
     def setup(self, stage: Optional[str] = None) -> None:

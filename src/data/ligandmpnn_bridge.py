@@ -99,6 +99,16 @@ def _encode_ligand_elements(y_t: torch.Tensor) -> torch.Tensor:
     return out
 
 
+def _encode_ligand_atomic_numbers(y_t: torch.Tensor) -> torch.Tensor:
+    """Return atomic numbers as int64 indices for an ``nn.Embedding`` layer.
+
+    Values are in [1, 118] for real elements plus 119 for "unknown" (the
+    parser's fallback for PDB element strings outside the standard table).
+    Index 0 is reserved for padding by the embedding layer.
+    """
+    return y_t.long()
+
+
 def _select_residue_crop(
     residue_coords: torch.Tensor,
     ligand_coords: torch.Tensor,
@@ -141,6 +151,7 @@ def load_example_from_pdb(
     parse_chains: Optional[List[str]] = None,
     include_zero_occupancy: bool = False,
     return_residue_ids: bool = False,
+    ligand_featurizer: str = "onehot6",
 ) -> Dict[str, object]:
     """Featurize a single PDB file into model-ready tensors.
 
@@ -166,20 +177,32 @@ def load_example_from_pdb(
             Required for inference-time chain-letter residue selection
             (fixed/redesigned residues, per-residue bias/omit). The training
             pipeline leaves this False to avoid the small per-batch overhead.
+        ligand_featurizer: ``"onehot6"`` (v1 default) or
+            ``"atomic_number_embedding"`` (v2 phase 1). The onehot path emits
+            a ``[M, 6]`` float tensor under key ``ligand_features``; the
+            embedding path emits ``[M]`` int64 atomic numbers under key
+            ``ligand_atomic_numbers``. Mutually exclusive — only one of the
+            two keys is present in the returned dict.
 
     Returns:
         Dict with keys:
 
-        * ``residue_coords``   ``[L, 3]``   Cα coordinates
-        * ``residue_features`` ``[L, 6]``   sin/cos backbone dihedrals
-        * ``residue_mask``     ``[L]``       all-True (valid residues only)
-        * ``sequence``         ``[L]``       int64 AA token indices
-        * ``design_mask``      ``[L]``       bool — which residues to design
-        * ``ligand_coords``    ``[M, 3]``    ligand heavy-atom coords
-        * ``ligand_features``  ``[M, 6]``    element one-hot
-        * ``ligand_mask``      ``[M]``       all-True (valid ligand atoms only)
-        * ``residue_ids``      ``List[str]`` (when ``return_residue_ids=True``)
+        * ``residue_coords``         ``[L, 3]``   Cα coordinates
+        * ``residue_features``       ``[L, 6]``   sin/cos backbone dihedrals
+        * ``residue_mask``           ``[L]``       all-True (valid residues only)
+        * ``sequence``               ``[L]``       int64 AA token indices
+        * ``design_mask``            ``[L]``       bool — which residues to design
+        * ``ligand_coords``          ``[M, 3]``    ligand heavy-atom coords
+        * ``ligand_features``        ``[M, 6]``    element one-hot (onehot6 only)
+        * ``ligand_atomic_numbers``  ``[M]``        int64 atomic numbers (embedding only)
+        * ``ligand_mask``            ``[M]``       all-True (valid ligand atoms only)
+        * ``residue_ids``            ``List[str]`` (when ``return_residue_ids=True``)
     """
+    if ligand_featurizer not in ("onehot6", "atomic_number_embedding"):
+        raise ValueError(
+            f"unknown ligand_featurizer={ligand_featurizer!r}; "
+            "expected 'onehot6' or 'atomic_number_embedding'"
+        )
     parsed = parse_pdb(
         pdb_path,
         cutoff_for_score=cutoff_for_score,
@@ -218,8 +241,8 @@ def load_example_from_pdb(
     ligand_elements = y_t[y_m]  # [M_near]
 
     if ligand_coords.numel() == 0:
-        ligand_coords   = torch.zeros((0, 3), dtype=torch.float32, device=device)
-        ligand_features = torch.zeros((0, 6), dtype=torch.float32, device=device)
+        ligand_coords = torch.zeros((0, 3), dtype=torch.float32, device=device)
+        ligand_elements = torch.zeros((0,), dtype=torch.long, device=device)
     else:
         # Keep nearest ligand atoms to residue centroid within fixed memory budget
         if ligand_coords.shape[0] > ligand_context_atoms:
@@ -228,7 +251,11 @@ def load_example_from_pdb(
             keep = torch.topk(dist, k=ligand_context_atoms, largest=False).indices
             ligand_coords   = ligand_coords[keep]
             ligand_elements = ligand_elements[keep]
-        ligand_features = _encode_ligand_elements(ligand_elements)
+
+    if ligand_featurizer == "onehot6":
+        ligand_repr_tensor = _encode_ligand_elements(ligand_elements)
+    else:  # "atomic_number_embedding" — validated at function entry
+        ligand_repr_tensor = _encode_ligand_atomic_numbers(ligand_elements)
 
     max_residues = max(1, max_total_nodes - ligand_coords.shape[0])
     keep_idx = _select_residue_crop(
@@ -263,9 +290,12 @@ def load_example_from_pdb(
         "sequence":         sequence.long(),
         "design_mask":      design_mask.bool(),
         "ligand_coords":    ligand_coords.float(),
-        "ligand_features":  ligand_features.float(),
         "ligand_mask":      torch.ones(ligand_coords.shape[0], dtype=torch.bool, device=device),
     }
+    if ligand_featurizer == "onehot6":
+        output["ligand_features"] = ligand_repr_tensor.float()
+    else:  # "atomic_number_embedding"
+        output["ligand_atomic_numbers"] = ligand_repr_tensor.long()
     if residue_ids_valid is not None:
         output["residue_ids"] = residue_ids_valid
     return output

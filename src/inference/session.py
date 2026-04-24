@@ -113,6 +113,10 @@ class InferenceSession:
         self.config = config
         self.device = device
         self.checkpoint_path = checkpoint_path
+        # v2 phase 1: data layer is the authoritative source; the model
+        # reads the same value via OmegaConf interpolation.
+        data_section = config.data if "data" in config else {}
+        self.ligand_featurizer = str(data_section.get("ligand_featurizer", "onehot6"))
 
     # ── Factory ───────────────────────────────────────────────────────────────
 
@@ -219,6 +223,7 @@ class InferenceSession:
             parse_chains=parse_chains,
             include_zero_occupancy=include_zero_occupancy,
             return_residue_ids=True,
+            ligand_featurizer=self.ligand_featurizer,
         )
 
         residue_ids: list[str] = example["residue_ids"]  # type: ignore[assignment]
@@ -248,20 +253,33 @@ class InferenceSession:
         residue_features = example["residue_features"].to(device).unsqueeze(0)
         residue_mask = example["residue_mask"].bool().to(device).unsqueeze(0)
         ligand_coords = example["ligand_coords"].to(device).unsqueeze(0)
-        ligand_features = example["ligand_features"].to(device).unsqueeze(0)
         ligand_mask = example["ligand_mask"].bool().to(device).unsqueeze(0)
         native_sequence = example["sequence"].to(device).long()
         design_mask = example["design_mask"].bool().to(device)
 
+        # Featurizer-specific ligand tensor. For mask_ligand: the onehot path
+        # zeroes the feature vector directly; the embedding path maps every
+        # slot to padding_idx=0, producing the same zero-vector effect.
+        if self.ligand_featurizer == "onehot6":
+            ligand_features = example["ligand_features"].to(device).unsqueeze(0)
+            if mask_ligand:
+                ligand_features = torch.zeros_like(ligand_features)
+        else:  # "atomic_number_embedding"
+            ligand_atomic_numbers = example["ligand_atomic_numbers"].to(device).unsqueeze(0)
+            if mask_ligand:
+                ligand_atomic_numbers = torch.zeros_like(ligand_atomic_numbers)
+
         if mask_ligand:
-            ligand_features = torch.zeros_like(ligand_features)
             ligand_mask = torch.zeros_like(ligand_mask)
 
         residue_count = residue_coords.shape[1]
         model = self.model
 
         residue_repr = model.residue_in(residue_features)
-        ligand_repr = model.ligand_in(ligand_features)
+        if self.ligand_featurizer == "onehot6":
+            ligand_repr = model.ligand_in(ligand_features)
+        else:  # "atomic_number_embedding"
+            ligand_repr = model.ligand_in(ligand_atomic_numbers)
         node_repr = model.node_norm(torch.cat([residue_repr, ligand_repr], dim=1))
         coords_all = torch.cat([residue_coords, ligand_coords], dim=1)
         node_mask = torch.cat([residue_mask, ligand_mask], dim=1)

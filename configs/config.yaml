@@ -44,6 +44,9 @@ model:
   dropout: 0.1
   gradient_checkpointing: false
   thermal_noise_std: 0.0
+  # v2 featurizer flags mirror data.* — the data layer is the authoritative
+  # source of truth; the model reads the same value so train/infer stay aligned.
+  ligand_featurizer: ${data.ligand_featurizer}
 
 data:
   batch_size: 8
@@ -52,6 +55,10 @@ data:
   ligand_context_atoms: 25
   cutoff_for_score: 8.0
   max_total_nodes: 384
+  # v2 phase 1 — "onehot6" = v1 6-bin element one-hot (default, unchanged).
+  # "atomic_number_embedding" = per-element learnable embedding over atomic
+  # numbers. See scripts/smoke_test_v2.py for forward-path coverage.
+  ligand_featurizer: onehot6
 
 inference:
   temperature: 0.1
