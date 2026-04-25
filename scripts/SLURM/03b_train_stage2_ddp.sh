@@ -42,6 +42,6 @@ srun uv run python scripts/train.py \
     ++training.devices=4 \
     ++training.warmup_steps=1000 \
     ++training.T_max=230000 \
-    ++trainer.init_from_checkpoint="checkpoints/pairmixerinv-v2-stage1-nodes64/last.ckpt"
+    ++trainer.init_from_checkpoint="checkpoints/pairmixerinv-v2-stage1-nodes64/last-v1.ckpt"
 
 echo "Stage 2 DDP complete."

@@ -140,9 +140,15 @@ def main(cfg: DictConfig) -> None:
     # subdir. Prevents v1↔v2 (and stage↔stage) cross-contamination of last.ckpt
     # and the epoch_snapshots dir; downstream tooling that references a specific
     # run's last.ckpt now has an unambiguous path.
+    # Filename template uses {val/loss} (Lightning's slash-aware key syntax) so
+    # the saved val_loss is the actual logged metric. The earlier
+    # {val_loss:.4f} form silently substituted 0 because the metric key is
+    # `val/loss` (slash), not `val_loss` (underscore) — saved files all
+    # showed val_loss=0.0000 despite real val_loss being a finite number.
     checkpoint_cb = ModelCheckpoint(
         dirpath=f"checkpoints/{run_name}",
-        filename="uma-inverse-{epoch:02d}-{val_loss:.4f}",
+        filename="uma-inverse-{epoch:02d}-{val/loss:.4f}",
+        auto_insert_metric_name=False,
         monitor="val/loss",
         mode="min",
         save_top_k=3,
@@ -155,6 +161,7 @@ def main(cfg: DictConfig) -> None:
     epoch_snapshot_cb = ModelCheckpoint(
         dirpath=f"checkpoints/{run_name}/epoch_snapshots",
         filename="epoch-{epoch:02d}",
+        auto_insert_metric_name=False,
         every_n_epochs=1,
         save_top_k=-1,
         save_on_train_epoch_end=True,
