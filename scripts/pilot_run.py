@@ -53,6 +53,15 @@ def main(cfg: DictConfig) -> None:
         ligand_context_atoms=int(cfg.data.ligand_context_atoms),
         cutoff_for_score=float(cfg.data.cutoff_for_score),
         max_total_nodes=int(cfg.data.max_total_nodes),
+        # v2 flags must match the model's forward expectations — defaults
+        # to v1 here would yield a KeyError when the config flips on v2 since
+        # the DataModule would emit ligand_features while the model asks for
+        # ligand_atomic_numbers.
+        ligand_featurizer=str(cfg.data.get("ligand_featurizer", "onehot6")),
+        residue_anchor=str(cfg.data.get("residue_anchor", "ca")),
+        return_backbone_coords=(
+            str(cfg.data.get("pair_distance_atoms", "anchor_only")) == "backbone_full"
+        ),
     )
 
     # Pilot-specific overrides:
