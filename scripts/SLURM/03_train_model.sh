@@ -33,7 +33,7 @@ echo "Starting Full UMA-Inverse Training Campaign (Curriculum Pipeline)..."
 # =========================================================================
 echo ">> [STAGE 1] 15 epochs at max_total_nodes=64, bsz=8, grad_ckpt=off"
 uv run python scripts/train.py \
-    run_name="pairmixerinv-stage1-nodes64" \
+    run_name="pairmixerinv-v2-stage1-nodes64" \
     ++trainer.max_epochs=15 \
     ++data.max_total_nodes=64 \
     ++data.batch_size=8 \
@@ -48,7 +48,7 @@ uv run python scripts/train.py \
 # =========================================================================
 echo ">> [STAGE 2] 25 epochs at max_total_nodes=128, bsz=4"
 uv run python scripts/train.py \
-    run_name="pairmixerinv-stage2-nodes128" \
+    run_name="pairmixerinv-v2-stage2-nodes128" \
     ++trainer.max_epochs=25 \
     ++data.max_total_nodes=128 \
     ++data.batch_size=4 \
@@ -56,7 +56,7 @@ uv run python scripts/train.py \
     ++model.gradient_checkpointing=false \
     ++training.warmup_steps=2000 \
     ++training.T_max=910000 \
-    ++trainer.init_from_checkpoint="checkpoints/last.ckpt"
+    ++trainer.init_from_checkpoint="checkpoints/pairmixerinv-v2-stage1-nodes64/last.ckpt"
 
 # =========================================================================
 # STAGE 3: FULL CONTEXT (N=384)
@@ -66,7 +66,7 @@ uv run python scripts/train.py \
 # =========================================================================
 echo ">> [STAGE 3] 60 epochs at max_total_nodes=384, bsz=2, grad_ckpt=on"
 uv run python scripts/train.py \
-    run_name="pairmixerinv-stage3-nodes384" \
+    run_name="pairmixerinv-v2-stage3-nodes384" \
     ++trainer.max_epochs=60 \
     ++data.max_total_nodes=384 \
     ++data.batch_size=2 \
@@ -74,6 +74,6 @@ uv run python scripts/train.py \
     ++model.gradient_checkpointing=true \
     ++training.warmup_steps=5000 \
     ++training.T_max=4400000 \
-    ++trainer.init_from_checkpoint="checkpoints/last.ckpt"
+    ++trainer.init_from_checkpoint="checkpoints/pairmixerinv-v2-stage2-nodes128/last.ckpt"
 
 echo "Full Curriculum Campaign Complete!"

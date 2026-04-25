@@ -1,5 +1,5 @@
 project_name: UMA-Inverse
-run_name: pairmixer-inverse-v1
+run_name: pairmixerinv-v2
 seed: 42
 
 paths:
@@ -57,24 +57,22 @@ data:
   ligand_context_atoms: 25
   cutoff_for_score: 8.0
   max_total_nodes: 384
-  # v2 phase 1 — "onehot6" = v1 6-bin element one-hot (default, unchanged).
+  # v2 phase 1 — "onehot6" = v1 6-bin element one-hot.
   # "atomic_number_embedding" = per-element learnable embedding over atomic
-  # numbers. See scripts/smoke_test_v2.py for forward-path coverage.
-  ligand_featurizer: onehot6
-  # v2 phase 2 — "ca" = v1 default (Cα is the residue anchor for pair-tensor
-  # distance). "cb" = virtual Cβ via the ProteinMPNN formula (N, CA, C → Cβ)
-  # so residue-ligand distances are measured from the sidechain stub rather
-  # than the backbone. Model is agnostic; flag is purely for the data layer
-  # and is mirrored into model.* for manifest traceability.
-  residue_anchor: ca
-  # v2 phase 3 — "anchor_only" = v1 default (single-atom pairwise distance
-  # over the concatenated residue+ligand coordinate tensor). "backbone_full"
-  # = the residue-residue [L,L] block uses 5 backbone-pair distances
-  # (Cα-Cα, Cα-N, Cα-C, N-O, O-C) stacked and re-projected; the [L,M],
-  # [M,L], [M,M] blocks stay single-atom (they involve ligand atoms, for
-  # which there is no backbone analogue). Phase 2 still governs the
-  # residue-ligand anchor even when this flag is on.
-  pair_distance_atoms: anchor_only
+  # numbers (slot 0 padding, 1-118 periodic table, 119 unknown). v2 default.
+  ligand_featurizer: atomic_number_embedding
+  # v2 phase 2 — "ca" = v1 (Cα is the residue anchor for pair-tensor distance).
+  # "cb" = virtual Cβ via the ProteinMPNN formula (N, CA, C → Cβ) so
+  # residue-ligand distances are measured from the sidechain stub rather than
+  # the backbone. v2 default.
+  residue_anchor: cb
+  # v2 phase 3 — "anchor_only" = v1 (single-atom pairwise distance over the
+  # concatenated residue+ligand coordinate tensor). "backbone_full" = the
+  # residue-residue [L,L] block uses 5 backbone-pair distances (Cα-Cα, Cα-N,
+  # Cα-C, N-O, O-C) stacked and re-projected; [L,M]/[M,L]/[M,M] blocks stay
+  # single-atom (ligand atoms have no backbone analogue). Phase 2 still
+  # governs the residue-ligand anchor under backbone_full. v2 default.
+  pair_distance_atoms: backbone_full
 
 inference:
   temperature: 0.1

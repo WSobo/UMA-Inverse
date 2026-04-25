@@ -18,10 +18,10 @@ cd /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse
 export WANDB_MODE="offline"
 
 # Stage 3 DDP on 8x A5500 (one full phoenix node).
-# Loads stage-2 weights via init_from_checkpoint — copy before submitting:
-#   cp checkpoints/last.ckpt checkpoints/stage2-final.ckpt
-# Fresh optimizer + LR scheduler so warmup + cosine are sized to THIS
-# stage's 30-epoch budget.
+# Loads stage-2 weights via init_from_checkpoint pointing at stage 2's scoped
+# checkpoint dir (no manual cp required — every run writes to its own subdir
+# of checkpoints/ now). Fresh optimizer + LR scheduler so warmup + cosine are
+# sized to THIS stage's 30-epoch budget.
 #
 # Effective global batch = 2 (per-rank) x 8 (ranks) = 16.
 # Steps/epoch = 145K samples / 16 ≈ 9_060. 30 epochs ≈ 272K steps.
@@ -36,7 +36,7 @@ export WANDB_MODE="offline"
 
 echo ">> [STAGE 3 DDP8] 30 epochs at max_total_nodes=384, bsz=2/rank, devices=8"
 srun uv run python scripts/train.py \
-    run_name="pairmixerinv-stage3-nodes384-ddp8" \
+    run_name="pairmixerinv-v2-stage3-nodes384-ddp8" \
     ++trainer.max_epochs=30 \
     ++data.max_total_nodes=384 \
     ++data.batch_size=2 \
@@ -45,6 +45,6 @@ srun uv run python scripts/train.py \
     ++training.devices=8 \
     ++training.warmup_steps=2000 \
     ++training.T_max=280000 \
-    ++trainer.init_from_checkpoint="checkpoints/stage2-final.ckpt"
+    ++trainer.init_from_checkpoint="checkpoints/pairmixerinv-v2-stage2-nodes128-ddp4/last.ckpt"
 
 echo "Stage 3 DDP complete."

@@ -33,7 +33,7 @@ export WANDB_MODE="offline"
 
 echo ">> [STAGE 2 DDP4] 25 epochs at max_total_nodes=128, bsz=4/rank, devices=4"
 srun uv run python scripts/train.py \
-    run_name="pairmixerinv-stage2-nodes128-ddp4" \
+    run_name="pairmixerinv-v2-stage2-nodes128-ddp4" \
     ++trainer.max_epochs=25 \
     ++data.max_total_nodes=128 \
     ++data.batch_size=4 \
@@ -42,6 +42,6 @@ srun uv run python scripts/train.py \
     ++training.devices=4 \
     ++training.warmup_steps=1000 \
     ++training.T_max=230000 \
-    ++trainer.init_from_checkpoint="checkpoints/last.ckpt"
+    ++trainer.init_from_checkpoint="checkpoints/pairmixerinv-v2-stage1-nodes64/last.ckpt"
 
 echo "Stage 2 DDP complete."

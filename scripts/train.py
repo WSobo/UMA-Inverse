@@ -136,8 +136,12 @@ def main(cfg: DictConfig) -> None:
     )
 
     # ── Callbacks ──────────────────────────────────────────────────────────────
+    # Scope checkpoints by run_name so each stage / experiment lives in its own
+    # subdir. Prevents v1↔v2 (and stage↔stage) cross-contamination of last.ckpt
+    # and the epoch_snapshots dir; downstream tooling that references a specific
+    # run's last.ckpt now has an unambiguous path.
     checkpoint_cb = ModelCheckpoint(
-        dirpath="checkpoints",
+        dirpath=f"checkpoints/{run_name}",
         filename="uma-inverse-{epoch:02d}-{val_loss:.4f}",
         monitor="val/loss",
         mode="min",
@@ -149,7 +153,7 @@ def main(cfg: DictConfig) -> None:
     # happens, so if val plateaus (as in stage 2) intermediate weights are
     # lost. epoch_snapshot_cb guarantees we can always go back to any epoch.
     epoch_snapshot_cb = ModelCheckpoint(
-        dirpath="checkpoints/epoch_snapshots",
+        dirpath=f"checkpoints/{run_name}/epoch_snapshots",
         filename="epoch-{epoch:02d}",
         every_n_epochs=1,
         save_top_k=-1,
