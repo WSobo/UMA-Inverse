@@ -259,6 +259,20 @@ def load_example_from_pdb(
     residue_mask = parsed["mask"].bool() # [L]
     chain_mask   = parsed["chain_mask"]  # [L]
 
+    # parse_pdb's "no protein residues" guard only triggers when backbone_rows
+    # is fully empty. DNA/RNA-only structures (e.g. 101d, 1cgc) have
+    # nucleotide entries with ATOM records, so backbone_rows is non-empty,
+    # but every entry has ca_ok=False since nucleotides have no Cα.
+    # mask.sum()==0 catches those: raising here lets the Dataset's slow-path
+    # exception handler fall through and sample a replacement instead of
+    # silently emitting an item with shape-0 residue tensors.
+    if int(residue_mask.sum().item()) == 0:
+        raise ValueError(
+            f"No Cα-present residues found in {pdb_path} "
+            f"(structure has {residue_mask.shape[0]} non-protein entries — "
+            "likely DNA/RNA-only)"
+        )
+
     # Per-residue anchor selection — Cα (v1) vs virtual Cβ (v2 phase 2).
     # Cβ is constructed before masking so the [L, 3] shape matches downstream
     # slicing, then masked the same way Cα was before.

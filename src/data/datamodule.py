@@ -125,47 +125,55 @@ class UMAInverseDataset(Dataset):
     ) -> List[str]:
         """Drop cached PDBs with 0 residues (DNA/RNA-only structures).
 
-        Scans the cache once and writes a reusable blacklist under
-        ``<processed_dir>/_zero_residue_ids.txt``. The scan is skipped
-        when the blacklist already exists; delete it to force a re-scan
-        after cache regeneration.
+        Scans the cache incrementally and maintains a blacklist at
+        ``<processed_dir>/_zero_residue_ids.txt``. Each call only scans
+        candidates that aren't already in the blacklist, so the second
+        Dataset construction (e.g. valid_dataset after train_dataset)
+        catches its own zero-residue PDBs without redoing prior work.
+        Delete the blacklist file to force a full re-scan after cache
+        regeneration.
         """
         blacklist_path = os.path.join(processed_dir, "_zero_residue_ids.txt")
+        bad_set: set[str] = set()
         if os.path.exists(blacklist_path):
             with open(blacklist_path) as f:
-                bad = {line.strip() for line in f if line.strip()}
-            return [p for p in candidate_ids if p not in bad]
+                bad_set = {line.strip() for line in f if line.strip()}
 
-        logger.info(
-            "Building zero-residue cache blacklist (one-time scan of %d entries)...",
-            len(candidate_ids),
-        )
-        bad: List[str] = []
-        for pid in candidate_ids:
-            path = os.path.join(processed_dir, f"{pid}.pt")
-            if not os.path.exists(path):
-                continue
-            try:
-                item = torch.load(path, map_location="cpu", weights_only=True)
-                if item["residue_coords"].shape[0] == 0:
-                    bad.append(pid)
-            except (RuntimeError, EOFError, OSError, KeyError):
-                # Corrupt / unexpected schema — treat as bad too so we
-                # don't retry in the hot path for every epoch.
-                bad.append(pid)
-
-        try:
-            os.makedirs(processed_dir, exist_ok=True)
-            with open(blacklist_path, "w") as f:
-                f.write("\n".join(bad) + ("\n" if bad else ""))
+        # Only scan candidates not already known-bad — keeps the
+        # incremental cost cheap on subsequent dataset constructions.
+        to_scan = [p for p in candidate_ids if p not in bad_set]
+        if to_scan:
             logger.info(
-                "Zero-residue blacklist: %d entries written to %s",
-                len(bad), blacklist_path,
+                "Scanning %d cache entries for zero-residue PDBs (blacklist has %d)...",
+                len(to_scan), len(bad_set),
             )
-        except OSError as e:
-            logger.warning("Could not write blacklist %s: %s", blacklist_path, e)
+            new_bad: List[str] = []
+            for pid in to_scan:
+                path = os.path.join(processed_dir, f"{pid}.pt")
+                if not os.path.exists(path):
+                    continue
+                try:
+                    item = torch.load(path, map_location="cpu", weights_only=True)
+                    if item["residue_coords"].shape[0] == 0:
+                        new_bad.append(pid)
+                except (RuntimeError, EOFError, OSError, KeyError):
+                    # Corrupt / unexpected schema — treat as bad too so we
+                    # don't retry in the hot path for every epoch.
+                    new_bad.append(pid)
 
-        bad_set = set(bad)
+            if new_bad:
+                bad_set.update(new_bad)
+                try:
+                    os.makedirs(processed_dir, exist_ok=True)
+                    with open(blacklist_path, "w") as f:
+                        f.write("\n".join(sorted(bad_set)) + "\n")
+                    logger.info(
+                        "Zero-residue blacklist: +%d new entries (%d total) -> %s",
+                        len(new_bad), len(bad_set), blacklist_path,
+                    )
+                except OSError as e:
+                    logger.warning("Could not write blacklist %s: %s", blacklist_path, e)
+
         return [p for p in candidate_ids if p not in bad_set]
 
     def __len__(self) -> int:
