@@ -106,12 +106,67 @@ class UMAInverseDataset(Dataset):
             )
         ]
 
+        # Phase 5 fix: pre-filter zero-residue cached samples (e.g. DNA-only
+        # PDBs like 100d) so overfit_batches=1 deterministically lands on a
+        # valid sample at index 0. The scan is cached to
+        # <processed_dir>/_zero_residue_ids.txt so subsequent runs are instant.
+        self.pdb_ids = self._filter_zero_residue_ids(self.pdb_ids, processed_dir)
+
         if not self.pdb_ids:
             raise RuntimeError(
                 f"No valid PDB entries found for {json_path}. "
                 f"Check pdb_dir={pdb_dir} and processed_dir={processed_dir}."
             )
         logger.info("Dataset loaded: %d structures from %s", len(self.pdb_ids), json_path)
+
+    @staticmethod
+    def _filter_zero_residue_ids(
+        candidate_ids: List[str], processed_dir: str
+    ) -> List[str]:
+        """Drop cached PDBs with 0 residues (DNA/RNA-only structures).
+
+        Scans the cache once and writes a reusable blacklist under
+        ``<processed_dir>/_zero_residue_ids.txt``. The scan is skipped
+        when the blacklist already exists; delete it to force a re-scan
+        after cache regeneration.
+        """
+        blacklist_path = os.path.join(processed_dir, "_zero_residue_ids.txt")
+        if os.path.exists(blacklist_path):
+            with open(blacklist_path) as f:
+                bad = {line.strip() for line in f if line.strip()}
+            return [p for p in candidate_ids if p not in bad]
+
+        logger.info(
+            "Building zero-residue cache blacklist (one-time scan of %d entries)...",
+            len(candidate_ids),
+        )
+        bad: List[str] = []
+        for pid in candidate_ids:
+            path = os.path.join(processed_dir, f"{pid}.pt")
+            if not os.path.exists(path):
+                continue
+            try:
+                item = torch.load(path, map_location="cpu", weights_only=True)
+                if item["residue_coords"].shape[0] == 0:
+                    bad.append(pid)
+            except (RuntimeError, EOFError, OSError, KeyError):
+                # Corrupt / unexpected schema — treat as bad too so we
+                # don't retry in the hot path for every epoch.
+                bad.append(pid)
+
+        try:
+            os.makedirs(processed_dir, exist_ok=True)
+            with open(blacklist_path, "w") as f:
+                f.write("\n".join(bad) + ("\n" if bad else ""))
+            logger.info(
+                "Zero-residue blacklist: %d entries written to %s",
+                len(bad), blacklist_path,
+            )
+        except OSError as e:
+            logger.warning("Could not write blacklist %s: %s", blacklist_path, e)
+
+        bad_set = set(bad)
+        return [p for p in candidate_ids if p not in bad_set]
 
     def __len__(self) -> int:
         return len(self.pdb_ids)
@@ -173,13 +228,6 @@ class UMAInverseDataset(Dataset):
 
         pdb_id = self.pdb_ids[idx]
 
-        # Required ligand key for the configured featurizer.
-        lig_key_needed = (
-            "ligand_features"
-            if self.ligand_featurizer == "onehot6"
-            else "ligand_atomic_numbers"
-        )
-
         # Fast path: load pre-computed cached tensor. Since Phase 4 the
         # preprocessor emits a "union cache" — every file carries both
         # ligand_features and ligand_atomic_numbers, residue_backbone_coords,
@@ -192,12 +240,17 @@ class UMAInverseDataset(Dataset):
             try:
                 item = torch.load(processed_path, map_location="cpu", weights_only=True)
                 item = self._adapt_cached_item(item)
-                if item is not None:
+                # Zero-residue samples (e.g. DNA-only PDBs like 100d that
+                # slipped into pre-v2 caches) produce NaN loss under
+                # cross-entropy-over-zero-valid-tokens. Skip them.
+                if item is not None and item["residue_coords"].shape[0] > 0:
                     item = _apply_runtime_crop(item, self.max_total_nodes)
                     item["pdb_id"] = pdb_id
                     return item
-                # Cache can't satisfy the current flags (e.g. legacy v1 cache
-                # but config asks for atomic_number_embedding) — fall through.
+                # Cache can't satisfy the current flags or has 0 residues —
+                # fall through to the slow PDB path.
+                if item is not None:
+                    _log_failed_pdb(pdb_id, "cache_zero_residues")
             except (RuntimeError, EOFError, OSError) as e:
                 logger.warning("Corrupted cache for %s (%s) — falling back to PDB", pdb_id, e)
                 _log_failed_pdb(pdb_id, f"cache_corrupt:{e}")

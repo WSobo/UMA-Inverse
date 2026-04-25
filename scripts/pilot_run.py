@@ -104,10 +104,14 @@ def main(cfg: DictConfig) -> None:
         name="pilot",
     )
 
+    # Read devices from config so DDP (stage 2/3) semantics can be rehearsed
+    # in the pilot by setting ++training.devices=2 at submit time. devices=1
+    # is the historical pilot default and stays single-GPU.
+    pilot_devices = int(cfg.training.get("devices", 1))
     trainer = pl.Trainer(
         max_epochs=pilot_epochs,
         accelerator=accelerator,
-        devices=1,
+        devices=pilot_devices,
         precision=precision,
         overfit_batches=1,
         logger=pilot_logger,
