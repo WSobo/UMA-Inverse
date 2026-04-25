@@ -163,10 +163,18 @@ def main(cfg: DictConfig) -> None:
         checkpoint_cb,
         epoch_snapshot_cb,
         LearningRateMonitor(logging_interval="step"),
+        # check_finite=False: tolerate transient NaN val/loss epochs without
+        # killing training. Lightning's default check_finite=True ended a v2
+        # stage-1 run after 1 of 15 epochs because a single bf16-mixed val
+        # sample produced NaN logits at max_total_nodes=64. ModelCheckpoint's
+        # save_top_k still ignores NaN-loss epochs, so best-ckpt selection
+        # remains correct; patience-based early stopping still kicks in if
+        # val/loss genuinely plateaus.
         EarlyStopping(
             monitor="val/loss",
             patience=int(cfg.training.get("early_stop_patience", 10)),
             mode="min",
+            check_finite=False,
         ),
         RichProgressBar(),
         RichModelSummary(max_depth=3),
