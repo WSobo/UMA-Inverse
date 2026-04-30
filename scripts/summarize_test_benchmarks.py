@@ -31,11 +31,9 @@ DEFAULT_OUT_DIR = PROJECT_ROOT / "outputs" / "benchmark" / "interface_recovery"
 # DA/DC/DG/DT (DNA) or A/U/G/C (RNA). The model was therefore trained without
 # any nucleotide context and cannot be compared to LigandMPNN on that split
 # until the featurizer is extended and the model retrained.
-COMPARED_RUNS = {
-    "metal":           "ep11-test_metal",
-    "small_molecule":  "ep11-test_small_molecule",
-}
-NUCLEOTIDE_RUN = ("nucleotide", "ep11-test_nucleotide")
+COMPARED_CLASSES = ("metal", "small_molecule")
+NUCLEOTIDE_CLASS = "nucleotide"
+DEFAULT_RUN_PREFIX = "ep11"
 
 # Dauparas et al. (LigandMPNN paper) — interface recovery at 5 Å sidechain
 # criterion. ProteinMPNN numbers included for context.
@@ -74,12 +72,27 @@ def _load_medians(run_dir: Path) -> tuple[list[float], int, dict]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR)
+    parser.add_argument(
+        "--run-prefix", type=str, default=DEFAULT_RUN_PREFIX,
+        help="Prefix used by 05c_benchmark_interface_recovery.sh to name run "
+             "subdirs. Default 'ep11' matches the v1 submission. Use e.g. "
+             "'v2-ep19' for a v2 stage-3 epoch-19 ckpt.",
+    )
+    parser.add_argument(
+        "--ckpt-label", type=str, default=None,
+        help="Human-readable ckpt label injected into the markdown header "
+             "(e.g. 'v2 stage-3 epoch 19, val_loss 1.146, val_acc 63.7%%'). "
+             "Falls back to the run-prefix if omitted.",
+    )
     args = parser.parse_args()
+
+    compared_runs = {cls: f"{args.run_prefix}-test_{cls}" for cls in COMPARED_CLASSES}
+    nucleotide_run = (NUCLEOTIDE_CLASS, f"{args.run_prefix}-test_{NUCLEOTIDE_CLASS}")
 
     rows: list[dict] = []
     missing: list[str] = []
 
-    for cls, run_name in COMPARED_RUNS.items():
+    for cls, run_name in compared_runs.items():
         run_dir = args.out_dir / run_name
         try:
             medians, n, summary = _load_medians(run_dir)
@@ -116,7 +129,7 @@ def main() -> None:
 
     # Nucleotide diagnostic block — not a fair comparison, but worth surfacing
     # so the paper-facing numbers don't silently omit it.
-    nucl_cls, nucl_run = NUCLEOTIDE_RUN
+    nucl_cls, nucl_run = nucleotide_run
     nucl_block: dict | None = None
     try:
         nucl_medians, nucl_n, nucl_summary = _load_medians(args.out_dir / nucl_run)
@@ -162,6 +175,7 @@ def main() -> None:
               f"(not a fair comparison — see markdown report)")
 
     # Markdown dump for the lab notebook
+    ckpt_label = args.ckpt_label or args.run_prefix
     md_lines = [
         "# UMA-Inverse vs LigandMPNN — interface sequence recovery",
         "",
@@ -171,7 +185,7 @@ def main() -> None:
         "statistic is the median across the 10 samples; the headline is the "
         "mean of those per-PDB medians.",
         "",
-        "UMA-Inverse checkpoint: stage-3 epoch 11 (val_loss 1.277, val_acc 59.7%).",
+        f"UMA-Inverse checkpoint: {ckpt_label}.",
         "Reference numbers from Dauparas et al. (LigandMPNN paper).",
         "",
         "| class | N PDBs | K samples | T | **UMA mean** | UMA median | UMA σ | LigandMPNN | ProteinMPNN | Δ vs LigandMPNN |",
@@ -214,10 +228,17 @@ def main() -> None:
             f"{LIGANDMPNN_REF[nucl_cls]:.3f} on this split.",
         ])
     md_lines.append("")
-    md_path = args.out_dir / "test_summary.md"
-    md_path.parent.mkdir(parents=True, exist_ok=True)
-    md_path.write_text("\n".join(md_lines))
-    print(f"\nwrote {md_path}")
+    md_text = "\n".join(md_lines)
+    args.out_dir.mkdir(parents=True, exist_ok=True)
+    # Always write a prefix-tagged copy so historical runs aren't overwritten
+    # when new ckpts are benchmarked.
+    tagged_path = args.out_dir / f"test_summary_{args.run_prefix}.md"
+    tagged_path.write_text(md_text)
+    print(f"\nwrote {tagged_path}")
+    # Also refresh the canonical 'test_summary.md' headline for the latest run.
+    canonical_path = args.out_dir / "test_summary.md"
+    canonical_path.write_text(md_text)
+    print(f"wrote {canonical_path}")
 
 
 if __name__ == "__main__":
