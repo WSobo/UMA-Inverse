@@ -121,21 +121,23 @@ def _per_position_recovery(pred: str, native: str, mask: np.ndarray) -> float:
 
 
 def _pairwise_hamming(seqs: list[str], mask: np.ndarray) -> float:
-    """Mean pairwise Hamming distance over the masked positions."""
+    """Mean pairwise Hamming distance over the masked positions.
+
+    Robust to length mismatches: trims `mask` to the shortest sequence
+    (LigandMPNN sometimes drops 1 residue with a missing CA atom).
+    """
     if not seqs or mask.sum() == 0:
         return float("nan")
-    seq_arrays = []
-    for s in seqs:
-        a = np.frombuffer(s.encode(), dtype="S1")
-        if a.shape[0] >= mask.shape[0]:
-            a = a[: mask.shape[0]]
-            seq_arrays.append(a[mask])
-        else:
-            return float("nan")
+    arrs = [np.frombuffer(s.encode(), dtype="S1") for s in seqs]
+    m = min(mask.shape[0], min(a.shape[0] for a in arrs))
+    mask_trim = mask[:m]
+    if mask_trim.sum() == 0:
+        return float("nan")
+    seq_arrays = [a[:m][mask_trim] for a in arrs]
     K = len(seq_arrays)
     if K < 2:
         return 0.0
-    n = mask.sum()
+    n = int(mask_trim.sum())
     pairs = list(itertools.combinations(range(K), 2))
     total = 0.0
     for i, j in pairs:

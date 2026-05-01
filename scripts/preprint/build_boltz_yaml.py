@@ -106,6 +106,7 @@ def build_yaml(
             - protein:
                 id: [A]
                 sequence: {sequence}
+                msa: empty
                 cyclic: false
             - ligand:
                 id: [B]
