@@ -88,35 +88,52 @@ def extract_native_sequence(pdb_path: Path, chain_id: str = "A") -> str:
 
 
 def build_yaml(
-    sequence: str,
+    sequence: str | list[tuple[str, str]],
     *,
     ligand_kind: str,  # "ccd" or "smiles"
     ligand_value: str,
+    ligand_id: str = "L",
     affinity: bool = True,
 ) -> str:
-    """Render a Boltz-2 input YAML. Returns the YAML text."""
+    """Render a Boltz-2 input YAML. Returns the YAML text.
+
+    `sequence` can be a single string (chain "A") or a list of
+    (chain_id, sequence) tuples for multi-chain proteins. Multi-chain is
+    needed for homodimers / heterodimers in the test split (1lqk, 7s7m).
+    """
     if ligand_kind not in ("ccd", "smiles"):
         raise ValueError(f"ligand_kind must be 'ccd' or 'smiles', got {ligand_kind!r}")
 
-    # Indent the sequence to match YAML style (no folding — Boltz-2 should
-    # tolerate a single long line).
-    yaml = textwrap.dedent(f"""\
-        version: 1
-        sequences:
-            - protein:
-                id: [A]
-                sequence: {sequence}
-                msa: empty
-                cyclic: false
+    if isinstance(sequence, str):
+        chains: list[tuple[str, str]] = [("A", sequence)]
+    else:
+        chains = list(sequence)
+
+    chain_blocks: list[str] = []
+    for chain_id, seq in chains:
+        chain_blocks.append(textwrap.dedent(f"""\
+                - protein:
+                    id: [{chain_id}]
+                    sequence: {seq}
+                    msa: empty
+                    cyclic: false
+            """).rstrip("\n"))
+
+    ligand_value_str = (
+        f"'{ligand_value}'" if ligand_kind == "smiles" else ligand_value
+    )
+    ligand_block = textwrap.dedent(f"""\
             - ligand:
-                id: [B]
-                {ligand_kind}: {"'" + ligand_value + "'" if ligand_kind == "smiles" else ligand_value}
-        """)
+                id: [{ligand_id}]
+                {ligand_kind}: {ligand_value_str}
+        """).rstrip("\n")
+
+    yaml = "version: 1\nsequences:\n" + "\n".join(chain_blocks) + "\n" + ligand_block + "\n"
     if affinity:
-        yaml += textwrap.dedent("""\
+        yaml += textwrap.dedent(f"""\
             properties:
                 - affinity:
-                    binder: B
+                    binder: {ligand_id}
             """)
     return yaml
 

@@ -38,6 +38,63 @@ from scripts.preprint.build_boltz_yaml import build_yaml  # type: ignore
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("build_cofold_yamls")
 
+# Standard amino acid codes — used to detect protein chains (vs DNA/RNA in 1qum).
+_STANDARD_AA = {
+    "ALA", "ARG", "ASN", "ASP", "CYS", "GLU", "GLN", "GLY", "HIS", "ILE",
+    "LEU", "LYS", "MET", "PHE", "PRO", "SER", "THR", "TRP", "TYR", "VAL",
+    "HID", "HIE", "HIP", "MSE",
+}
+
+
+def _resolve_pdb_path(pdb_dir: Path, pdb_id: str) -> Path | None:
+    pid = pdb_id.lower()
+    nested = pdb_dir / pid[1:3] / f"{pid}.pdb"
+    if nested.exists():
+        return nested
+    flat = pdb_dir / f"{pid}.pdb"
+    if flat.exists():
+        return flat
+    return None
+
+
+def _protein_chain_lengths(pdb_path: Path) -> list[tuple[str, int]]:
+    """Return [(chain_id, n_residues), ...] for protein chains in PDB iteration order.
+
+    Iteration order follows BioPython's chain order (matches the order that UMA's
+    pdb_parser and LigandMPNN concatenate when building the design sequence).
+    Chains with zero standard-AA residues are dropped (e.g. DNA chains in 1qum).
+    """
+    from Bio.PDB import PDBParser
+    structure = PDBParser(QUIET=True).get_structure("s", str(pdb_path))
+    model = next(iter(structure))
+    chains: list[tuple[str, int]] = []
+    for chain in model:
+        n = sum(
+            1 for r in chain
+            if r.get_id()[0] == " " and r.get_resname().strip().upper() in _STANDARD_AA
+        )
+        if n > 0:
+            chains.append((chain.get_id(), n))
+    return chains
+
+
+def _split_design_into_chains(
+    design_seq: str, chain_lengths: list[tuple[str, int]]
+) -> list[tuple[str, str]] | None:
+    """Split a flat design sequence at chain boundaries.
+
+    Returns None if the lengths don't match (caller should warn + skip).
+    """
+    expected = sum(n for _cid, n in chain_lengths)
+    if len(design_seq) != expected:
+        return None
+    chunks: list[tuple[str, str]] = []
+    offset = 0
+    for cid, n in chain_lengths:
+        chunks.append((cid, design_seq[offset:offset + n]))
+        offset += n
+    return chunks
+
 
 def _read_fasta(path: Path) -> list[tuple[str, str]]:
     records: list[tuple[str, str]] = []
@@ -100,6 +157,16 @@ def main() -> None:
     )
     parser.add_argument("--samples-per-pdb", type=int, default=5)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--metal-pdb-dir",
+        type=Path,
+        default=PROJECT_ROOT / "data" / "raw" / "pdb_archive" / "test_metal",
+    )
+    parser.add_argument(
+        "--smallmol-pdb-dir",
+        type=Path,
+        default=PROJECT_ROOT / "data" / "raw" / "pdb_archive" / "test_small_molecule",
+    )
     args = parser.parse_args()
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
@@ -126,53 +193,62 @@ def main() -> None:
             logger.warning("%s: no ligand identifier in selection JSON, skipping", pdb_id)
             continue
 
-        # UMA designs
-        uma_designs = _load_uma_designs(pdb_id, args.uma_dir)
-        if not uma_designs:
-            logger.info("UMA designs missing for %s -- will skip in cofold batch", pdb_id)
-            n_missing["uma_v2"] += 1
-        else:
-            sample_indices = rng.sample(range(len(uma_designs)),
-                                         min(args.samples_per_pdb, len(uma_designs)))
+        # Resolve protein chain lengths for this PDB (for multi-chain split).
+        pdb_dir = args.smallmol_pdb_dir if kind == "small_molecule" else args.metal_pdb_dir
+        pdb_path = _resolve_pdb_path(pdb_dir, pdb_id)
+        if pdb_path is None:
+            logger.warning("%s: PDB file not found, skipping", pdb_id)
+            continue
+        chain_lengths = _protein_chain_lengths(pdb_path)
+        if len(chain_lengths) > 1:
+            logger.info("%s: multimer (%s)", pdb_id,
+                         ", ".join(f"{cid}={n}" for cid, n in chain_lengths))
+
+        def _emit(method: str, designs: list[str]) -> None:
+            if not designs:
+                logger.info("%s designs missing for %s -- will skip in cofold batch",
+                             method, pdb_id)
+                n_missing[method] += 1
+                return
+            sample_indices = rng.sample(range(len(designs)),
+                                         min(args.samples_per_pdb, len(designs)))
             for s_idx in sample_indices:
-                seq = uma_designs[s_idx]
+                seq = designs[s_idx]
+                if len(chain_lengths) == 1:
+                    yaml_seq: str | list[tuple[str, str]] = seq
+                else:
+                    chunks = _split_design_into_chains(seq, chain_lengths)
+                    if chunks is None:
+                        logger.warning(
+                            "%s sample %d: design length %d does not match chain "
+                            "lengths %s -- emitting as single chain (may yield wrong "
+                            "structure)",
+                            pdb_id, s_idx, len(seq),
+                            ", ".join(f"{c}={n}" for c, n in chain_lengths),
+                        )
+                        yaml_seq = seq
+                    else:
+                        yaml_seq = chunks
+                # Pick a ligand chain id that doesn't collide with any protein chain.
+                used_ids = {cid for cid, _ in chain_lengths}
+                ligand_id = next(c for c in "LBCDEFGHIJKMNOPQRSTUVWXYZ" if c not in used_ids)
                 yaml_text = build_yaml(
-                    sequence=seq,
+                    sequence=yaml_seq,
                     ligand_kind="ccd",
                     ligand_value=ligand_value,
+                    ligand_id=ligand_id,
                     affinity=True,
                 )
-                out_path = args.out_dir / "uma_v2" / f"{pdb_id}_sample{s_idx:02d}.yaml"
+                out_path = args.out_dir / method / f"{pdb_id}_sample{s_idx:02d}.yaml"
                 out_path.write_text(yaml_text)
-                n_emitted["uma_v2"] += 1
+                n_emitted[method] += 1
                 sampling_record.append({
-                    "pdb_id": pdb_id, "kind": kind, "method": "uma_v2",
+                    "pdb_id": pdb_id, "kind": kind, "method": method,
                     "sample_idx": s_idx, "yaml": str(out_path),
                 })
 
-        # LigandMPNN designs
-        lig_designs = _load_ligandmpnn_designs(pdb_id, args.ligandmpnn_dir)
-        if not lig_designs:
-            logger.info("LigandMPNN designs missing for %s -- will skip in cofold batch", pdb_id)
-            n_missing["ligandmpnn"] += 1
-        else:
-            sample_indices = rng.sample(range(len(lig_designs)),
-                                         min(args.samples_per_pdb, len(lig_designs)))
-            for s_idx in sample_indices:
-                seq = lig_designs[s_idx]
-                yaml_text = build_yaml(
-                    sequence=seq,
-                    ligand_kind="ccd",
-                    ligand_value=ligand_value,
-                    affinity=True,
-                )
-                out_path = args.out_dir / "ligandmpnn" / f"{pdb_id}_sample{s_idx:02d}.yaml"
-                out_path.write_text(yaml_text)
-                n_emitted["ligandmpnn"] += 1
-                sampling_record.append({
-                    "pdb_id": pdb_id, "kind": kind, "method": "ligandmpnn",
-                    "sample_idx": s_idx, "yaml": str(out_path),
-                })
+        _emit("uma_v2", _load_uma_designs(pdb_id, args.uma_dir))
+        _emit("ligandmpnn", _load_ligandmpnn_designs(pdb_id, args.ligandmpnn_dir))
 
     # Persist the sampling record for downstream metric computation
     record_path = args.out_dir / "sampling_record.json"
