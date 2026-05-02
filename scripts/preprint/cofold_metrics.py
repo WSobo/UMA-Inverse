@@ -107,9 +107,17 @@ def _native_pocket_and_ligand(
 def _cofold_pocket_and_ligand(
     cif_path: Path, pocket_residue_ids: set[str]
 ) -> tuple[dict[str, np.ndarray], np.ndarray]:
-    """Same as _native_pocket_and_ligand but for a Boltz-2 CIF (chain A protein + chain B ligand)."""
-    from Bio.PDB.MMCIFParser import MMCIFParser
-    parser = MMCIFParser(QUIET=True)
+    """Same as _native_pocket_and_ligand but for a Boltz-2 cofold output.
+
+    Boltz-2 emits .pdb when invoked with --output_format pdb (our default for
+    this experiment) and .cif otherwise. Pick the parser based on suffix.
+    """
+    if cif_path.suffix.lower() in (".cif", ".mmcif"):
+        from Bio.PDB.MMCIFParser import MMCIFParser
+        parser = MMCIFParser(QUIET=True)
+    else:
+        from Bio.PDB import PDBParser
+        parser = PDBParser(QUIET=True)
     structure = parser.get_structure("s", str(cif_path))
     model = next(iter(structure))
 
