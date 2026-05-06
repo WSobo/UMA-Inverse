@@ -73,15 +73,27 @@ def _kabsch(P: np.ndarray, Q: np.ndarray) -> tuple[np.ndarray, np.ndarray, float
 
 
 def _native_pocket_and_ligand(
-    pdb_path: Path, pocket_residue_ids: set[str]
-) -> tuple[dict[str, np.ndarray], np.ndarray]:
-    """Returns ({rid: native_Calpha_xyz}, native_ligand_atoms_xyz)."""
+    pdb_path: Path,
+    pocket_residue_ids: set[str],
+    ligand_ccd: str | None = None,
+) -> tuple[dict[str, tuple[int, np.ndarray]], np.ndarray]:
+    """Returns ({rid: (chain_A_index, native_Calpha_xyz)}, native_ligand_atoms_xyz).
+
+    `chain_A_index` is the 0-based position of the residue within chain A's
+    standard-AA residues, in PDB iteration order. This is the alignment key
+    used to match against Boltz-2's cofold output (which renumbers chain A
+    to 1..L regardless of native residue numbering).
+
+    `ligand_ccd`, if given, filters native ligand atoms to that CCD only.
+    Otherwise all non-water HETATM atoms are returned (legacy behaviour).
+    """
     from Bio.PDB import PDBParser
     structure = PDBParser(QUIET=True).get_structure("s", str(pdb_path))
     model = next(iter(structure))
 
-    native_pocket: dict[str, np.ndarray] = {}
+    native_pocket: dict[str, tuple[int, np.ndarray]] = {}
     native_ligand: list[list[float]] = []
+    chain_a_index = 0
 
     for chain in model:
         chain_id = chain.get_id()
@@ -90,11 +102,18 @@ def _native_pocket_and_ligand(
             ic = icode.strip()
             rid = f"{chain_id}{resnum}{ic}" if ic else f"{chain_id}{resnum}"
             if het_flag == " ":
-                if rid in pocket_residue_ids and "CA" in residue:
-                    native_pocket[rid] = np.array(residue["CA"].get_coord(), dtype=np.float64)
+                if rid in pocket_residue_ids and "CA" in residue and chain_id == "A":
+                    native_pocket[rid] = (
+                        chain_a_index,
+                        np.array(residue["CA"].get_coord(), dtype=np.float64),
+                    )
+                if chain_id == "A":
+                    chain_a_index += 1
             elif het_flag != "W":
                 resname = residue.get_resname().strip().upper()
                 if resname in {"HOH", "WAT"}:
+                    continue
+                if ligand_ccd is not None and resname != ligand_ccd.strip().upper():
                     continue
                 for atom in residue.get_atoms():
                     elem = (atom.element or atom.get_name()[0]).strip().upper()
@@ -105,9 +124,17 @@ def _native_pocket_and_ligand(
 
 
 def _cofold_pocket_and_ligand(
-    cif_path: Path, pocket_residue_ids: set[str]
+    cif_path: Path, pocket_indices: dict[int, str]
 ) -> tuple[dict[str, np.ndarray], np.ndarray]:
-    """Same as _native_pocket_and_ligand but for a Boltz-2 cofold output.
+    """Extract chain-A pocket Calphas + ligand heavy atoms from a Boltz-2 cofold.
+
+    Boltz-2 renumbers chain A residues 1..L regardless of the native PDB's
+    chain-A numbering, so we match by *0-based position in chain A* rather
+    than by raw residue number.
+
+    `pocket_indices` maps `chain_a_index -> native_rid` (built from the
+    native side via ``_native_pocket_and_ligand``). The returned dict's keys
+    are the native rids, so they're aligned with native_pocket for Kabsch.
 
     Boltz-2 emits .pdb when invoked with --output_format pdb (our default for
     this experiment) and .cif otherwise. Pick the parser based on suffix.
@@ -124,31 +151,20 @@ def _cofold_pocket_and_ligand(
     cofold_pocket: dict[str, np.ndarray] = {}
     cofold_ligand: list[list[float]] = []
 
-    # Boltz-2 outputs renumber the chain-A residues 1..L. We need to map back
-    # to the native pocket residue IDs by *position in chain A*. The caller
-    # is responsible for producing pocket_residue_ids in chain-A residue-number
-    # form (e.g. "A23"), and we'll match by the integer suffix here.
-    pocket_nums: dict[int, str] = {}
-    for rid in pocket_residue_ids:
-        if rid[0] != "A":
-            continue
-        try:
-            num = int("".join(c for c in rid[1:] if c.isdigit()))
-        except ValueError:
-            continue
-        pocket_nums[num] = rid
-
+    chain_a_index = 0
     for chain in model:
         chain_id = chain.get_id()
         for residue in chain:
-            het_flag, resnum, icode = residue.get_id()
+            het_flag, _resnum, _icode = residue.get_id()
             if chain_id == "A" and het_flag == " ":
-                if resnum in pocket_nums and "CA" in residue:
-                    cofold_pocket[pocket_nums[resnum]] = np.array(
+                if chain_a_index in pocket_indices and "CA" in residue:
+                    rid = pocket_indices[chain_a_index]
+                    cofold_pocket[rid] = np.array(
                         residue["CA"].get_coord(), dtype=np.float64
                     )
+                chain_a_index += 1
             elif chain_id != "A":
-                # Ligand chain. Boltz-2 names it "B" by default per our YAMLs.
+                # Ligand chain (Boltz-2 names it via the YAML's ligand id).
                 for atom in residue.get_atoms():
                     elem = (atom.element or atom.get_name()[0]).strip().upper()
                     if elem in {"H", "D"}:
@@ -190,6 +206,7 @@ def _extract_metrics_for_input(
     method_dir: Path,
     pocket_residue_ids: set[str],
     native_pdb_path: Path,
+    ligand_ccd: str | None = None,
 ) -> dict | None:
     """Parse all 5 model cofolds + confidences + affinity for one Boltz-2 input."""
     pred_dir = method_dir / f"boltz_results_{method_dir.name}" / "predictions" / base
@@ -217,8 +234,12 @@ def _extract_metrics_for_input(
             continue
 
         try:
-            native_pocket, native_lig = _native_pocket_and_ligand(native_pdb_path, pocket_residue_ids)
-            cofold_pocket, cofold_lig = _cofold_pocket_and_ligand(struct_path, pocket_residue_ids)
+            native_pocket, native_lig = _native_pocket_and_ligand(
+                native_pdb_path, pocket_residue_ids, ligand_ccd=ligand_ccd,
+            )
+            # Build the chain-A-index -> native-rid mapping for the cofold lookup.
+            pocket_indices = {idx: rid for rid, (idx, _xyz) in native_pocket.items()}
+            cofold_pocket, cofold_lig = _cofold_pocket_and_ligand(struct_path, pocket_indices)
             common = sorted(set(native_pocket) & set(cofold_pocket))
             if len(common) < 3:
                 rmsds_per_model.append({"pocket_calpha_rmsd": float("nan"),
@@ -226,7 +247,7 @@ def _extract_metrics_for_input(
                                           "scaffold_rmsd": float("nan")})
                 continue
             P = np.stack([cofold_pocket[r] for r in common])
-            Q = np.stack([native_pocket[r] for r in common])
+            Q = np.stack([native_pocket[r][1] for r in common])
             R, t, pocket_rmsd = _kabsch(P, Q)
 
             # Apply same alignment to all cofold ligand atoms, compute RMSD to native ligand.
@@ -364,7 +385,10 @@ def main() -> None:
         # base used in the output dir tree is <pdb_id>_sample<NN>.
         base = f"{pdb_id}_sample{s_idx:02d}"
 
-        metrics = _extract_metrics_for_input(base, method_dir, pocket_set, native_pdb_path)
+        ligand_ccd = sel.get("ccd_code") or sel.get("ion")
+        metrics = _extract_metrics_for_input(
+            base, method_dir, pocket_set, native_pdb_path, ligand_ccd=ligand_ccd,
+        )
         if metrics is None:
             logger.info("no cofold output found for %s [%s]", base, method)
             continue

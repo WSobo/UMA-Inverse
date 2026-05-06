@@ -103,6 +103,7 @@ def main() -> None:
         "--sampling-record", str(PROJECT_ROOT / "outputs" / "preprint"
                                   / "boltz_inputs" / "cofold" / "sampling_record.json"),
         "--cofold-base", str(PROJECT_ROOT / "outputs" / "preprint" / "cofold"),
+        "--selection", str(args.combined_selection),
         "--out", str(out_orig),
     ])
 
@@ -113,6 +114,7 @@ def main() -> None:
             "uv", "run", "python", "scripts/preprint/cofold_metrics.py",
             "--sampling-record", str(sampling_ext),
             "--cofold-base", str(PROJECT_ROOT / "outputs" / "preprint" / "cofold_extended"),
+            "--selection", str(args.combined_selection),
             "--out", str(out_ext),
         ])
     else:

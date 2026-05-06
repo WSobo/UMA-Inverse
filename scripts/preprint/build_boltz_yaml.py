@@ -119,9 +119,10 @@ def build_yaml(
                     cyclic: false
             """).rstrip("\n"))
 
-    ligand_value_str = (
-        f"'{ligand_value}'" if ligand_kind == "smiles" else ligand_value
-    )
+    # Always quote — PyYAML parses bare numeric-looking strings (CCD codes
+    # like "989" or "964") as ints, which Boltz then crashes on with
+    # "object of type 'int' has no len()".
+    ligand_value_str = f"'{ligand_value}'"
     ligand_block = textwrap.dedent(f"""\
             - ligand:
                 id: [{ligand_id}]
