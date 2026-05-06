@@ -1,6 +1,6 @@
 # UMA-Inverse
 
-UMA-Inverse is a LigandMPNN-style inverse-folding project that mirrors the UMA-Fold repository layout but swaps sparse message passing for a dense invariant PairMixer encoder.
+UMA-Inverse is a LigandMPNN-style inverse-folding project that swaps sparse message passing for a dense invariant PairMixer encoder.
 
 ## Why this architecture
 
