@@ -238,7 +238,6 @@ def main() -> None:
         per_pdb_rows.append(row)
 
         if idx % 20 == 0 or idx == len(resolved):
-            elapsed = time.time() - t_start
             logger.info("progress %d/%d  median_iface=%.3f  (%.1fs/pdb)",
                         idx, len(resolved), row.median_recovery, wall)
 

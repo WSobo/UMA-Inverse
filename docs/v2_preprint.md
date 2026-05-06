@@ -98,9 +98,9 @@ Twenty PDBs are selected from the LigandMPNN test splits — 10 metal, 10 small-
 - **Small molecules**: 10 distinct ligand CCD codes (no protein bound to multiple inhibitors crowding the selection), with per-protein dedup at 60% Jaccard pocket-residue overlap.
 - **Metals**: artifact filter excludes PDBs whose only metal HETATM is Ni²⁺ (typical IMAC purification artifact) or whose coordination shell is ≥4 histidines and 0 acidic residues (heuristic for non-functional surface-bound metals).
 
-Implementation at `scripts/preprint/select_pdbs.py`. Selection persisted at `outputs/preprint/pdb_selection.json` with per-PDB pocket residue IDs, ligand identity (CCD code or ion symbol), and selection_reason for provenance.
+Implementation at `scripts/paper/select_pdbs.py`. Selection persisted at `outputs/preprint/pdb_selection.json` with per-PDB pocket residue IDs, ligand identity (CCD code or ion symbol), and selection_reason for provenance.
 
-For each selected PDB, both UMA-v2 and LigandMPNN are tasked with **redesigning the protein with the pocket residues forced to their native identity**. K=20 sequences are generated per (PDB, method) at T=0.1, random decoding order. Implementation at `scripts/preprint/run_pocket_fixed_designs.py` (UMA, via the existing `DesignConstraints.fix` path) and `scripts/preprint/build_ligandmpnn_inputs.py` + `scripts/SLURM/preprint_ligandmpnn_pocket_fixed.sh` (LigandMPNN, via `LigandMPNN/run.py --fixed_residues_multi`).
+For each selected PDB, both UMA-v2 and LigandMPNN are tasked with **redesigning the protein with the pocket residues forced to their native identity**. K=20 sequences are generated per (PDB, method) at T=0.1, random decoding order. Implementation at `scripts/paper/run_pocket_fixed_designs.py` (UMA, via the existing `DesignConstraints.fix` path) and `scripts/paper/build_ligandmpnn_inputs.py` + `scripts/SLURM/preprint_ligandmpnn_pocket_fixed.sh` (LigandMPNN, via `LigandMPNN/run.py --fixed_residues_multi`).
 
 Per (PDB, method, sample) metrics:
 - **Distal recovery**: fraction of non-fixed positions where predicted == native.
@@ -126,7 +126,7 @@ Per (PDB, method, sample, diffusion_sample) metrics:
 
 **Important caveat: Boltz-2 ipTM, plDDT, and affinity are model predictions, not measurements.** They are useful for relative comparisons between two design methods evaluating the same scaffold (where systematic prediction errors should largely cancel) but are not interpretable as absolute binding affinity or design quality. We do not claim binding affinities or catalytic efficiencies on the basis of these metrics; we use them as a proxy for "did the redesign produce a coherent ligand-pocket complex."
 
-Cofold inputs are constructed by `scripts/preprint/build_cofold_yamls.py` (one Boltz-2 YAML per (PDB, method, sample), with multi-chain support and quoted CCD codes); the SLURM wrappers `scripts/SLURM/preprint_boltz_cofold.sh` and `preprint_boltz_cofold_extended.sh` invoke `boltz predict` in directory mode against these inputs with the flags above. Cofold-quality metrics are extracted in `scripts/preprint/cofold_metrics.py`.
+Cofold inputs are constructed by `scripts/paper/build_cofold_yamls.py` (one Boltz-2 YAML per (PDB, method, sample), with multi-chain support and quoted CCD codes); the SLURM wrappers `scripts/SLURM/preprint_boltz_cofold.sh` and `preprint_boltz_cofold_extended.sh` invoke `boltz predict` in directory mode against these inputs with the flags above. Cofold-quality metrics are extracted in `scripts/paper/cofold_metrics.py`.
 
 ---
 
@@ -259,11 +259,11 @@ This work does not advocate for or against KNN message-passing. We document an a
 
 ## 5. Code and data availability
 
-All code, configuration files, training logs, and benchmark scripts are at `<github URL TBD>`, branch `v2-element-embedding`. The canonical v2 stage-3 checkpoint is at `checkpoints/pairmixerinv-v2-stage3-nodes384-ddp8/uma-inverse-19-1.1463.ckpt`. PDB selection for the pocket-fixed redesign experiment is at `outputs/preprint/pdb_selection.json` and is fully reproducible from `scripts/preprint/select_pdbs.py` given the same v2-ep19 benchmark CSVs as input.
+All code, configuration files, training logs, and benchmark scripts are at `<github URL TBD>`, branch `v2-element-embedding`. The canonical v2 stage-3 checkpoint is at `checkpoints/pairmixerinv-v2-stage3-nodes384-ddp8/uma-inverse-19-1.1463.ckpt`. PDB selection for the pocket-fixed redesign experiment is at `outputs/preprint/pdb_selection.json` and is fully reproducible from `scripts/paper/select_pdbs.py` given the same v2-ep19 benchmark CSVs as input.
 
 The training data (LigandMPNN train/valid splits, 154K PDBs) is fetched from RCSB by `scripts/SLURM/01a_fetch_data.sh`; the cached `.pt` tensors are produced by `scripts/SLURM/01b_preprocess.sh`. Both are deterministic given the LigandMPNN split JSONs.
 
-Boltz-2 cofolds [Passaro et al. 2025] were generated using the public release (<https://github.com/jwohlwend/boltz>) with the exact CLI flags documented in `scripts/SLURM/run_boltz_example.sh` and the YAML schema in `scripts/preprint/build_boltz_yaml.py` and `scripts/preprint/build_cofold_yamls.py`.
+Boltz-2 cofolds [Passaro et al. 2025] were generated using the public release (<https://github.com/jwohlwend/boltz>) with the exact CLI flags documented in `scripts/SLURM/run_boltz_example.sh` and the YAML schema in `scripts/paper/build_boltz_yaml.py` and `scripts/paper/build_cofold_yamls.py`.
 
 ---
 

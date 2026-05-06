@@ -1,7 +1,7 @@
 """Tests for PairMixerBlock and its triangle multiplication sub-modules."""
 
-import torch
 import pytest
+import torch
 
 from src.models.pairmixer_block import (
     PairMixerBlock,
@@ -9,7 +9,6 @@ from src.models.pairmixer_block import (
     TriangleMultiplicationIncoming,
     TriangleMultiplicationOutgoing,
 )
-
 
 # ──────────────────────────────────────────────────────────────────────────────
 # PairTransition

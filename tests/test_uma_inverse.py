@@ -1,10 +1,9 @@
 """Tests for the UMAInverse end-to-end model."""
 
-import torch
 import pytest
+import torch
 
-from src.models.uma_inverse import UMAInverse, RBFEmbedding
-
+from src.models.uma_inverse import RBFEmbedding, UMAInverse
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Helpers

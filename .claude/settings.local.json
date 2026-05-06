@@ -21,7 +21,8 @@
       "Bash(awk 'NR==2{print length\\($0\\)}' outputs/preprint/uma_pocket_fixed/1lqk/designs.fasta)",
       "Bash(rm -rf /tmp/cofold_test_method)",
       "Bash(git commit -m ' *)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(xargs ls -lh)"
     ]
   }
 }

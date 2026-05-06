@@ -53,7 +53,7 @@ def download_pdb(pdb_id: str, out_dir: str) -> bool:
 
 
 def _load_ids_from_json(json_path: str) -> set:
-    with open(json_path, "r") as f:
+    with open(json_path) as f:
         data = json.load(f)
     if isinstance(data, list):
         return set(str(x) for x in data)

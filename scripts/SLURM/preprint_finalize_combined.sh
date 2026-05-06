@@ -17,6 +17,6 @@
 set -e
 cd /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse
 
-uv run python scripts/preprint/finalize_combined_metrics.py "$@"
+uv run python scripts/paper/finalize_combined_metrics.py "$@"
 
 echo "Done."

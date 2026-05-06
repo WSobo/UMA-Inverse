@@ -23,6 +23,6 @@ echo ">> UMA pocket-fixed designs"
 echo ">>   ckpt: checkpoints/pairmixerinv-v2-stage3-nodes384-ddp8/uma-inverse-19-1.1463.ckpt"
 echo ">>   selection: outputs/preprint/pdb_selection.json"
 
-uv run python scripts/preprint/run_pocket_fixed_designs.py "$@"
+uv run python scripts/paper/run_pocket_fixed_designs.py "$@"
 
 echo "Done."

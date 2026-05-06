@@ -8,7 +8,6 @@ Output format is intentionally compatible with what ``load_example_from_pdb``
 in ``ligandmpnn_bridge.py`` expects, so no downstream code changes are needed.
 """
 import logging
-from typing import Dict, List, Optional, Tuple
 
 import torch
 
@@ -17,7 +16,7 @@ logger = logging.getLogger(__name__)
 # ── Amino acid vocabulary ─────────────────────────────────────────────────────
 # Alphabetical order of single-letter codes — MUST match LigandMPNN tokenisation.
 # alphabet = 'ACDEFGHIKLMNPQRSTVWY'  (X = 20 for unknown/non-standard)
-_AA3_TO_TOKEN: Dict[str, int] = {
+_AA3_TO_TOKEN: dict[str, int] = {
     "ALA": 0,   # A
     "CYS": 1,   # C
     "ASP": 2,   # D
@@ -53,13 +52,13 @@ _AA3_TO_TOKEN: Dict[str, int] = {
     "CME": 1,   # S,S-dimethylarsinoyl  → CYS
 }
 
-_BACKBONE_ATOMS: Tuple[str, ...] = ("N", "CA", "C", "O")
+_BACKBONE_ATOMS: tuple[str, ...] = ("N", "CA", "C", "O")
 _WATER_NAMES = frozenset({"HOH", "WAT", "H2O", "DOD", "DIS", "D2O"})
 
 # ── Element → atomic number (common small-molecule elements only) ─────────────
 # The _encode_ligand_elements function bins these into 6 groups anyway;
 # this map is for populating Y_t which expects raw atomic numbers.
-_ELEM_TO_ATOMIC_NUM: Dict[str, int] = {
+_ELEM_TO_ATOMIC_NUM: dict[str, int] = {
     "H": 1,  "D": 1,   "B": 5,   "C": 6,   "N": 7,   "O": 8,   "F": 9,
     "SI": 14, "P": 15,  "S": 16,  "CL": 17, "SE": 34, "BR": 35, "I": 53,
     "FE": 26, "ZN": 30, "MG": 12, "CA": 20, "MN": 25, "CU": 29,
@@ -71,9 +70,9 @@ def parse_pdb(
     pdb_path: str,
     cutoff_for_score: float = 8.0,
     device: str = "cpu",
-    parse_chains: Optional[List[str]] = None,
+    parse_chains: list[str] | None = None,
     include_zero_occupancy: bool = False,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     """Parse a PDB file into tensors compatible with ``load_example_from_pdb``.
 
     Args:
@@ -131,10 +130,10 @@ def parse_pdb(
     parse_chain_set = set(parse_chains) if parse_chains else None
 
     # Accumulate per-residue backbone data and ligand atoms
-    backbone_rows: List[Tuple[torch.Tensor, int, bool]] = []  # (coords[4,3], token, ca_ok)
-    residue_meta: List[Tuple[str, int, str]] = []  # (chain_id, res_num, insertion_code)
-    ca_coords_list: List[torch.Tensor] = []                   # valid Cα positions
-    ligand_atoms: List[Tuple[torch.Tensor, int]] = []         # (coord[3], atomic_num)
+    backbone_rows: list[tuple[torch.Tensor, int, bool]] = []  # (coords[4,3], token, ca_ok)
+    residue_meta: list[tuple[str, int, str]] = []  # (chain_id, res_num, insertion_code)
+    ca_coords_list: list[torch.Tensor] = []                   # valid Cα positions
+    ligand_atoms: list[tuple[torch.Tensor, int]] = []         # (coord[3], atomic_num)
 
     for chain in model:
         chain_id = chain.get_id()

@@ -191,7 +191,7 @@ for s in samples:
 top = samples[0]
 print(f"native : {ids_to_sequence(native_tokens.tolist())}")
 print(f"design : {ids_to_sequence(top.token_ids.tolist())}")
-print(f"diff   : " + "".join(
+print("diff   : " + "".join(
     " " if a == b else "^"
     for a, b in zip(native_tokens.tolist(), top.token_ids.tolist())
 ))

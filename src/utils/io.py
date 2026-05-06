@@ -1,4 +1,4 @@
-from typing import Iterable
+from collections.abc import Iterable
 
 ID_TO_AA = {
     0: "A",

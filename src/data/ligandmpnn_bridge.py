@@ -9,7 +9,6 @@ JSON files (``train.json``, ``valid.json``) are still needed.
 import json
 import logging
 import os
-from typing import Dict, List, Optional
 
 import torch
 
@@ -18,14 +17,14 @@ from .pdb_parser import parse_pdb
 logger = logging.getLogger(__name__)
 
 
-def load_json_ids(json_path: str) -> List[str]:
+def load_json_ids(json_path: str) -> list[str]:
     """Load a list of PDB IDs from a LigandMPNN-style JSON split file."""
-    with open(json_path, "r", encoding="utf-8") as f:
+    with open(json_path, encoding="utf-8") as f:
         ids = json.load(f)
     return [str(x) for x in ids]
 
 
-def resolve_pdb_path(pdb_dir: str, pdb_id: str) -> Optional[str]:
+def resolve_pdb_path(pdb_dir: str, pdb_id: str) -> str | None:
     """Return the first existing path for *pdb_id* under *pdb_dir*, or None."""
     pdb_id = str(pdb_id)
     sub_dir = pdb_id.lower()[1:3] if len(pdb_id) >= 4 else "misc"
@@ -172,13 +171,13 @@ def load_example_from_pdb(
     cutoff_for_score: float = 8.0,
     max_total_nodes: int = 384,
     device: str = "cpu",
-    parse_chains: Optional[List[str]] = None,
+    parse_chains: list[str] | None = None,
     include_zero_occupancy: bool = False,
     return_residue_ids: bool = False,
     ligand_featurizer: str = "onehot6",
     residue_anchor: str = "ca",
     return_backbone_coords: bool = False,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     """Featurize a single PDB file into model-ready tensors.
 
     Uses the self-contained ``pdb_parser.parse_pdb`` — no LigandMPNN clone
@@ -286,11 +285,11 @@ def load_example_from_pdb(
     residue_features = _compute_backbone_dihedrals(x)[residue_mask]  # [L_valid, 6]
     sequence         = parsed["S"][residue_mask].long()        # [L_valid]
     design_mask      = chain_mask[residue_mask].bool()         # [L_valid]
-    residue_backbone_coords: Optional[torch.Tensor] = (
+    residue_backbone_coords: torch.Tensor | None = (
         x[residue_mask] if return_backbone_coords else None    # [L_valid, 4, 3]
     )
 
-    residue_ids_valid: Optional[List[str]] = None
+    residue_ids_valid: list[str] | None = None
     if return_residue_ids:
         chain_ids = parsed["chain_ids"]
         res_nums = parsed["res_nums"]
@@ -354,7 +353,7 @@ def load_example_from_pdb(
         keep_indices = keep_idx.tolist()
         residue_ids_valid = [residue_ids_valid[i] for i in keep_indices]
 
-    output: Dict[str, object] = {
+    output: dict[str, object] = {
         "residue_coords":      residue_coords.float(),
         "residue_features":    residue_features.float(),
         "residue_mask":        torch.ones(residue_coords.shape[0], dtype=torch.bool, device=device),

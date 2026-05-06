@@ -4,15 +4,14 @@ These tests exercise the full pipeline path without touching disk or GPUs,
 using synthetic in-memory data.  They catch regressions that unit tests miss —
 e.g. shape mismatches between collate_batch and the model's forward pass.
 """
+import pytest
 import torch
 import torch.nn.functional as F
-import pytest
 
 from src.data.datamodule import collate_batch
 from src.models.uma_inverse import UMAInverse
 from src.training.lightning_module import UMAInverseLightningModule
 from tests.conftest import make_sample, small_model_config
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 

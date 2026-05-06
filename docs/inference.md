@@ -39,7 +39,7 @@ On the HPC cluster **always** wrap GPU inference in `srun` or submit via
 ```bash
 uv run uma-inverse design \
     --pdb inputs/my_protein.pdb \
-    --ckpt checkpoints/last.ckpt \
+    --ckpt checkpoints/uma-inverse-v2.ckpt \
     --num-samples 10 \
     --temperature 0.1 \
     --top-p 0.95 \
@@ -231,7 +231,7 @@ Reproducibility record:
 {
   "run_name": "1bc8-20260422-123456",
   "command": "uma-inverse design --pdb … --ckpt …",
-  "checkpoint_path": "checkpoints/last.ckpt",
+  "checkpoint_path": "checkpoints/uma-inverse-v2.ckpt",
   "checkpoint_sha256": "abc123…",
   "config_path": "configs/config.yaml",
   "config_snapshot": { /* full resolved config */ },
@@ -269,7 +269,7 @@ Compute per-position log-likelihoods.
 ```bash
 uv run uma-inverse score \
     --pdb inputs/my_protein.pdb \
-    --ckpt checkpoints/last.ckpt \
+    --ckpt checkpoints/uma-inverse-v2.ckpt \
     --mode autoregressive \
     --num-batches 10 \
     --seed 42 \
@@ -322,7 +322,7 @@ from src.inference.output import (
 
 session = InferenceSession.from_checkpoint(
     config_path="configs/config.yaml",
-    checkpoint="checkpoints/last.ckpt",
+    checkpoint="checkpoints/uma-inverse-v2.ckpt",
     device="cuda",
 )
 ctx = session.load_structure("inputs/my.pdb", mask_ligand=False)

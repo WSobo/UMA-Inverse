@@ -36,7 +36,7 @@ OUT_DIR="${PROJ}/outputs/preprint/ligandmpnn_pocket_fixed"
 if [[ ! -f "${INPUTS_DIR}/pdb_path_multi.json" || ! -f "${INPUTS_DIR}/fixed_residues_multi.json" ]]; then
     echo ">> Building LigandMPNN inputs..."
     cd "${PROJ}"
-    uv run python scripts/preprint/build_ligandmpnn_inputs.py
+    uv run python scripts/paper/build_ligandmpnn_inputs.py
 fi
 
 mkdir -p "${OUT_DIR}"

@@ -10,14 +10,14 @@ produces and how to run it.
 ```bash
 # Dev iteration (500 random PDBs from the val split; ~30 min on A5500)
 uv run uma-inverse benchmark \
-    --ckpt checkpoints/uma-inverse-best.ckpt \
+    --ckpt checkpoints/uma-inverse-v2.ckpt \
     --val-json LigandMPNN/training/valid.json \
     --pdb-dir data/raw/pdb_archive \
     --out-dir outputs/benchmark
 
 # Full validation split (~7153 PDBs; several hours on A5500)
 uv run uma-inverse benchmark \
-    --ckpt checkpoints/uma-inverse-best.ckpt \
+    --ckpt checkpoints/uma-inverse-v2.ckpt \
     --val-json LigandMPNN/training/valid.json \
     --pdb-dir data/raw/pdb_archive \
     --all

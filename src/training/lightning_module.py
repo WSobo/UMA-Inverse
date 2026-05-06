@@ -1,7 +1,7 @@
 """UMA-Inverse Lightning training module."""
 import logging
 import math
-from typing import Any, Dict
+from typing import Any
 
 import pytorch_lightning as pl
 import torch
@@ -27,7 +27,7 @@ def _warmup_cosine_lambda(warmup_steps: int, T_max: int):
 class UMAInverseLightningModule(pl.LightningModule):
     def __init__(
         self,
-        model_config: Dict[str, Any],
+        model_config: dict[str, Any],
         lr: float = 3e-4,
         weight_decay: float = 1e-2,
         warmup_steps: int = 500,
@@ -59,14 +59,14 @@ class UMAInverseLightningModule(pl.LightningModule):
 
     # ── Forward ───────────────────────────────────────────────────────────────
 
-    def forward(self, batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    def forward(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         return self.model(batch)
 
     # ── Shared loss computation ───────────────────────────────────────────────
 
     def _compute_loss_and_metrics(
-        self, batch: Dict[str, torch.Tensor]
-    ) -> Dict[str, torch.Tensor]:
+        self, batch: dict[str, torch.Tensor]
+    ) -> dict[str, torch.Tensor]:
         """Run one forward pass and return loss + accuracy over designed residues."""
         outputs = self(batch)
         logits = outputs["logits"]
@@ -87,7 +87,7 @@ class UMAInverseLightningModule(pl.LightningModule):
 
     # ── Training step ─────────────────────────────────────────────────────────
 
-    def training_step(self, batch: Dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
+    def training_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
         # Deterministic-per-(epoch, batch) decoding order: non-designed residues
         # decode first so designed ones condition on fixed context.
         # Seeded by (current_epoch * 1e6 + batch_idx) for reproducibility.
@@ -133,7 +133,7 @@ class UMAInverseLightningModule(pl.LightningModule):
 
     # ── Validation step ───────────────────────────────────────────────────────
 
-    def validation_step(self, batch: Dict[str, torch.Tensor], batch_idx: int) -> None:
+    def validation_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> None:
         out = self._compute_loss_and_metrics(batch)
         self.log("val/loss", out["loss"], prog_bar=True, sync_dist=False)
         self.log("val/acc",  out["acc"],  prog_bar=True, sync_dist=False)

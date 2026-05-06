@@ -1,5 +1,4 @@
 import math
-from typing import Dict, Optional
 
 import torch
 from torch import Tensor, nn
@@ -55,7 +54,7 @@ class PairMixerEncoder(nn.Module):
 
 
 class UMAInverse(nn.Module):
-    def __init__(self, config: Dict) -> None:
+    def __init__(self, config: dict) -> None:
         super().__init__()
         residue_input_dim = int(config.get("residue_input_dim", 6))
         ligand_input_dim = int(config.get("ligand_input_dim", 6))
@@ -185,7 +184,7 @@ class UMAInverse(nn.Module):
         coords: Tensor,
         pair_mask: Tensor,
         residue_count: int,
-        residue_backbone_coords: Optional[Tensor] = None,
+        residue_backbone_coords: Tensor | None = None,
     ) -> Tensor:
         node_i = self.pair_i(node_repr).unsqueeze(2)
         node_j = self.pair_j(node_repr).unsqueeze(1)
@@ -272,9 +271,9 @@ class UMAInverse(nn.Module):
     def _autoregressive_context(
         self,
         z: Tensor,
-        sequence: Optional[Tensor],
+        sequence: Tensor | None,
         residue_mask: Tensor,
-        decoding_order: Optional[Tensor] = None,
+        decoding_order: Tensor | None = None,
     ) -> Tensor:
         batch_size, residue_count = residue_mask.shape
         if sequence is None:
@@ -321,7 +320,7 @@ class UMAInverse(nn.Module):
         ctx = ctx.view(batch_size, residue_count, H * D)
         return self.ar_out(ctx)
 
-    def forward(self, batch: Dict[str, Tensor]) -> Dict[str, Tensor]:
+    def forward(self, batch: dict[str, Tensor]) -> dict[str, Tensor]:
         residue_coords = batch["residue_coords"]
         residue_features = batch["residue_features"]
         residue_mask = batch["residue_mask"].bool()

@@ -1,0 +1,31 @@
+cff-version: 1.2.0
+message: "If you use UMA-Inverse in your work, please cite the bioRxiv preprint and this software repository."
+title: "UMA-Inverse: Dense Pair-Wise Attention for Ligand-Conditioned Protein Sequence Design"
+type: software
+authors:
+  - family-names: Sobolewski
+    given-names: Wojciech
+    email: wsobolew@ucsc.edu
+    affiliation: "Yeh Lab, University of California, Santa Cruz"
+    orcid: "https://orcid.org/0000-0000-0000-0000"  # TODO: replace with real ORCID
+license: MIT
+repository-code: "https://github.com/<TBD>/UMA-Inverse"
+url: "https://huggingface.co/WSobo/UMA-Inverse_v2"
+keywords:
+  - protein-design
+  - inverse-folding
+  - ligand-conditioned
+  - structural-biology
+  - deep-learning
+  - pair-attention
+preferred-citation:
+  type: article
+  title: "UMA-Inverse: Dense Pair-Wise Attention for Ligand-Conditioned Protein Sequence Design"
+  authors:
+    - family-names: Sobolewski
+      given-names: Wojciech
+      email: wsobolew@ucsc.edu
+      affiliation: "Yeh Lab, University of California, Santa Cruz"
+  year: 2026
+  journal: "bioRxiv"
+  doi: "TBD"  # populate after bioRxiv submission

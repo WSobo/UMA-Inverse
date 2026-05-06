@@ -7,6 +7,26 @@ name = "uma-inverse"
 version = "0.1.0"
 description = "Ligand-conditioned protein inverse folding via PairMixer dense pair representation"
 readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Wojciech Sobolewski", email = "wsobolew@ucsc.edu"},
+]
+keywords = [
+    "protein-design",
+    "inverse-folding",
+    "ligand-conditioned",
+    "deep-learning",
+    "structural-biology",
+    "pair-attention",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 requires-python = ">=3.13"
 dependencies = [
     "biopython>=1.84",
@@ -33,6 +53,12 @@ dev = [
     "ruff>=0.7",
 ]
 
+[project.urls]
+Repository = "https://github.com/<TBD>/UMA-Inverse"
+Preprint   = "https://www.biorxiv.org/content/<TBD>"
+Weights    = "https://huggingface.co/WSobo/UMA-Inverse_v2"
+Issues     = "https://github.com/<TBD>/UMA-Inverse/issues"
+
 [project.scripts]
 uma-train = "scripts.train:main"
 uma-inverse = "src.inference.cli:main"
@@ -56,6 +82,12 @@ target-version = "py313"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
 ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# Scripts insert the project root onto sys.path before importing the package,
+# which is the standard pattern for runnable entry points and intentionally
+# violates "imports at top of file".
+"scripts/**/*.py" = ["E402"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

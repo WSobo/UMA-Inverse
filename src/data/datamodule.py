@@ -9,13 +9,13 @@ import logging
 import os
 import random
 from concurrent.futures import ProcessPoolExecutor
-from typing import Dict, List, Optional
 
 import pytorch_lightning as pl
 import torch
 from torch.utils.data import DataLoader, Dataset
 
 from src import PROJECT_ROOT
+
 from .ligandmpnn_bridge import load_example_from_pdb, load_json_ids, resolve_pdb_path
 
 logger = logging.getLogger(__name__)
@@ -24,7 +24,7 @@ _FAILED_PDB_LOG = os.path.join(PROJECT_ROOT, "logs", "failed_pdbs.txt")
 _MAX_RETRY_DEPTH = 5   # max recursive fallback attempts per sample
 
 
-def _scan_one_for_zero_residues(args: tuple) -> Optional[str]:
+def _scan_one_for_zero_residues(args: tuple) -> str | None:
     """Worker for the parallel zero-residue scan.
 
     Top-level so ProcessPoolExecutor can pickle it. Returns the pdb_id when
@@ -62,7 +62,7 @@ def _log_failed_pdb(pdb_id: str, reason: str) -> None:
         pass  # never crash the training loop over logging
 
 
-def _apply_runtime_crop(item: Dict[str, torch.Tensor], max_total_nodes: int) -> Dict[str, torch.Tensor]:
+def _apply_runtime_crop(item: dict[str, torch.Tensor], max_total_nodes: int) -> dict[str, torch.Tensor]:
     """Re-crop a cached sample to max_total_nodes (residues + ligand atoms).
 
     The preprocessing cache is built with a large cap (e.g. 1024). When the
@@ -150,8 +150,8 @@ class UMAInverseDataset(Dataset):
 
     @staticmethod
     def _filter_zero_residue_ids(
-        candidate_ids: List[str], processed_dir: str
-    ) -> List[str]:
+        candidate_ids: list[str], processed_dir: str
+    ) -> list[str]:
         """Drop cached PDBs with 0 residues (DNA/RNA-only structures).
 
         Scans the cache incrementally and maintains a blacklist at
@@ -179,7 +179,7 @@ class UMAInverseDataset(Dataset):
                 len(to_scan), len(bad_set), workers,
             )
             args = [(pid, processed_dir) for pid in to_scan]
-            new_bad: List[str] = []
+            new_bad: list[str] = []
             # chunksize=200 amortizes IPC overhead across the I/O-bound
             # torch.load calls; on 12 CPUs this brings the 147K-entry
             # scan from ~20 min serial to ~1-2 min.
@@ -207,8 +207,8 @@ class UMAInverseDataset(Dataset):
         return len(self.pdb_ids)
 
     def _adapt_cached_item(
-        self, item: Dict[str, torch.Tensor]
-    ) -> Optional[Dict[str, torch.Tensor]]:
+        self, item: dict[str, torch.Tensor]
+    ) -> dict[str, torch.Tensor] | None:
         """Project a cached item onto the currently-configured feature set.
 
         The preprocessor writes a "union cache" with every v2 key, so we can
@@ -254,7 +254,7 @@ class UMAInverseDataset(Dataset):
 
         return out
 
-    def __getitem__(self, idx: int, _depth: int = 0) -> Dict[str, torch.Tensor]:
+    def __getitem__(self, idx: int, _depth: int = 0) -> dict[str, torch.Tensor]:
         if _depth >= _MAX_RETRY_DEPTH:
             raise RuntimeError(
                 f"UMAInverseDataset: exceeded {_MAX_RETRY_DEPTH} retries — "
@@ -319,7 +319,7 @@ class UMAInverseDataset(Dataset):
 # ── Collation helpers ─────────────────────────────────────────────────────────
 
 def _pad_2d(
-    items: List[torch.Tensor], max_len: int, feat_dim: int, dtype: torch.dtype
+    items: list[torch.Tensor], max_len: int, feat_dim: int, dtype: torch.dtype
 ) -> torch.Tensor:
     out = torch.zeros((len(items), max_len, feat_dim), dtype=dtype)
     for i, t in enumerate(items):
@@ -329,7 +329,7 @@ def _pad_2d(
 
 
 def _pad_1d(
-    items: List[torch.Tensor],
+    items: list[torch.Tensor],
     max_len: int,
     dtype: torch.dtype,
     fill_value: int = 0,
@@ -342,7 +342,7 @@ def _pad_1d(
 
 
 def _pad_3d(
-    items: List[torch.Tensor],
+    items: list[torch.Tensor],
     max_len: int,
     feat_dim_1: int,
     feat_dim_2: int,
@@ -360,7 +360,7 @@ def _pad_3d(
     return out
 
 
-def collate_batch(batch: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
+def collate_batch(batch: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
     """Pad a list of variable-length samples into a single batch dict.
 
     Ligand featurizer and backbone-coords presence are detected per-batch
@@ -416,7 +416,7 @@ class UMAInverseDataModule(pl.LightningDataModule):
         ligand_context_atoms: int = 25,
         cutoff_for_score: float = 8.0,
         max_total_nodes: int = 384,
-        processed_dir: Optional[str] = None,
+        processed_dir: str | None = None,
         ligand_featurizer: str = "onehot6",
         residue_anchor: str = "ca",
         return_backbone_coords: bool = False,
@@ -436,8 +436,8 @@ class UMAInverseDataModule(pl.LightningDataModule):
         self.residue_anchor = residue_anchor
         self.return_backbone_coords = return_backbone_coords
 
-        self.train_dataset: Optional[UMAInverseDataset] = None
-        self.valid_dataset: Optional[UMAInverseDataset] = None
+        self.train_dataset: UMAInverseDataset | None = None
+        self.valid_dataset: UMAInverseDataset | None = None
 
     def _make_dataset(self, json_path: str) -> UMAInverseDataset:
         return UMAInverseDataset(
@@ -452,7 +452,7 @@ class UMAInverseDataModule(pl.LightningDataModule):
             return_backbone_coords=self.return_backbone_coords,
         )
 
-    def setup(self, stage: Optional[str] = None) -> None:
+    def setup(self, stage: str | None = None) -> None:
         if stage in (None, "fit"):
             self.train_dataset = self._make_dataset(self.train_json)
             self.valid_dataset = self._make_dataset(self.valid_json)

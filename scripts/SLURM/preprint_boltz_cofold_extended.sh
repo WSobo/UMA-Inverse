@@ -33,7 +33,7 @@ CACHE=/private/groups/yehlab/wsobolew/.boltz_cache_shared
 # ── 1. Build cofold YAMLs (uv env) ──────────────────────────────────────────
 echo ">> [1/2] Building cofold YAMLs for extended selection"
 cd "${PROJ}"
-uv run python scripts/preprint/build_cofold_yamls.py \
+uv run python scripts/paper/build_cofold_yamls.py \
     --selection "${EXT_SELECTION}" \
     --out-dir "${INPUT_BASE}" 2>&1 | tail -20
 
