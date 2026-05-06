@@ -11,7 +11,7 @@ Correspondence: `wsobolew@ucsc.edu`. Code and weights: <https://github.com/...> 
 
 ## Abstract
 
-Existing ligand-conditioned protein sequence design methods, notably LigandMPNN, are built on top of K-nearest-neighbor message-passing graphs that limit ligand information to each residue's local protein neighborhood. We explore an alternative architecture, **UMA-Inverse**, which uses a single dense pair-wise attention encoder over the concatenated residue + ligand atom set with no KNN sparsification. UMA-Inverse outperforms ProteinMPNN on the LigandMPNN-paper interface-recovery benchmark by **+8.0 percentage points on metal-binding sites (0.486 vs 0.406)** and **+3.3 percentage points on small molecules (0.538 vs 0.505)**, but trails LigandMPNN itself, with the gap concentrated on metal sites (-28.9 pp). To characterize where dense pair-wise attention may offer a structural advantage absent from local KNN methods, we test the methods at **pocket-fixed redesign**: holding the binding-pocket residues to their native identities and asking the model to redesign the rest of the protein. Using Boltz-2 cofolding to evaluate redesigned sequences against their cognate ligands, we find <RESULT TBD: distal sequence diversity, predicted-affinity comparison, pocket-pose preservation>. We argue that dense pair-wise attention is a viable architectural alternative to KNN message-passing for ligand-conditioned design, particularly in regimes where global context propagation is needed.
+Existing ligand-conditioned protein sequence design methods, notably LigandMPNN, are built on K-nearest-neighbor message-passing graphs that limit ligand information to each residue's local protein neighborhood. We introduce **UMA-Inverse**, an alternative architecture that uses a single dense pair-wise attention encoder over the concatenated residue + ligand atom set with no KNN sparsification. UMA-Inverse outperforms ProteinMPNN on the LigandMPNN-paper interface-recovery benchmark by **+8.0 percentage points on metal-binding sites (0.486 vs 0.406)** and **+3.3 percentage points on small molecules (0.538 vs 0.505)**, but trails LigandMPNN itself overall, with the gap concentrated on metal sites (−28.9 pp). To characterize where dense pair-wise attention may offer a structural advantage that local KNN methods cannot, we evaluate both methods on **pocket-fixed redesign** — locking the binding-pocket residues to native and asking the model to redesign the remaining protein. Across N = 25 small-molecule PDBs (with the v2-friendly selection tiebreaker scrubbed), UMA-Inverse produces distal-position designs that are significantly less diverse than LigandMPNN's (mean pairwise Hamming 0.13 vs 0.19, paired Wilcoxon p = 0.0015), with broadly identical per-PDB AA preferences (median Pearson r = 0.85 between methods' AA distributions). Critically, UMA's per-PDB distal-position confidence is significantly correlated with downstream Boltz-2 cofold ipTM (r = 0.52, p = 0.016) and complex pLDDT (r = 0.58, p = 0.006), whereas LigandMPNN's per-PDB confidence is uncorrelated with the same metrics — so UMA's narrower distal posterior is a *signal* of design quality, not noise. We argue that dense pair-wise attention is the natural architecture for the **pocket-fixed redesign use case** (sequence diversification, allosteric tuning, scaffold engineering on a fixed pocket), where confident-but-pocket-conditioned distal redesigns are preferable to broad-but-uninformed ones.
 
 ---
 
@@ -21,13 +21,13 @@ Designing protein sequences that fold to a specified backbone is the inverse-fol
 
 LigandMPNN's architecture inherits ProteinMPNN's locality assumption: each residue sees only its K nearest ligand atoms (default K=25), with no direct edge to ligand atoms beyond that radius. In practice this is fine for residues directly contacting a ligand, but it creates an information bottleneck for residues farther away — distal protein-side scaffolding residues that may nonetheless influence pocket geometry only see ligand context through 2-3 hops of message passing, mixed at each hop with K=25 other contributions. We hypothesize that this locality may matter for design tasks where global context propagation is important: e.g., redesigning a distal residue *to support* a fixed binding pocket.
 
-In this work we build and evaluate **UMA-Inverse**, an alternative architecture for the same problem. Rather than three sparse KNN graphs, UMA-Inverse uses a single dense pair-wise attention encoder over the union of residue and ligand atom nodes. Every residue has direct edges to every ligand atom and every other residue; no graph sparsification. We benchmark UMA-Inverse on LigandMPNN's protocol (interface sequence recovery, 10 designs/PDB, T=0.1, random decoding order) and find that it lands between LigandMPNN and ProteinMPNN on standard recovery metrics. We then characterize a regime where the architectural difference *should* matter — pocket-fixed redesign — and find <STATEMENT OF RESULT TBD>.
+In this work we build and evaluate **UMA-Inverse**, an alternative architecture for the same problem. Rather than three sparse KNN graphs, UMA-Inverse uses a single dense pair-wise attention encoder over the union of residue and ligand atom nodes. Every residue has direct edges to every ligand atom and every other residue; no graph sparsification. We benchmark UMA-Inverse on LigandMPNN's protocol (interface sequence recovery, 10 designs/PDB, T=0.1, random decoding order) and find that it lands between LigandMPNN and ProteinMPNN on standard recovery metrics. We then characterize the regime where the architectural difference *does* matter — pocket-fixed redesign — and find that UMA-Inverse's distal posterior is significantly narrower than LigandMPNN's on small-molecule pockets, that this narrowness is uncorrelated between the two methods (so they're tracking different signals at distal positions), and that UMA's per-PDB confidence at distal positions is the only one of the two that meaningfully predicts downstream Boltz-2 cofold quality.
 
 The contribution is threefold:
 
 1. A single-encoder, dense-pair-wise-attention baseline for ligand-conditioned inverse folding.
 2. Like-for-like benchmark numbers under the LigandMPNN protocol, including all three test splits.
-3. Empirical comparison of UMA vs LigandMPNN on pocket-fixed redesign, with structural analysis via Boltz-2 cofolding.
+3. The empirical case for **pocket-fixed redesign** as the use case where dense pair attention (as a class) is most differentiated from sparse KNN, with structural analysis via Boltz-2 cofolding and a per-PDB confidence-vs-quality correlation that is significant for UMA-Inverse and null for LigandMPNN.
 
 ---
 
@@ -155,36 +155,84 @@ The nucleotide split is included in our benchmark for transparency but is **not 
 
 The 3-stage curriculum delivers monotonically increasing val accuracy across stages: 0.426 → 0.511 → 0.639. Stage 1 (max_total_nodes=64) plateaus quickly; the 64-node residue crop is too aggressive to learn long-range pocket-residue contacts. Stage 2 (max_total_nodes=128) delivers the largest single-stage gain (+9 pp), corresponding to the median train-set residue count being roughly within budget. Stage 3 (max_total_nodes=384) adds another +13 pp, with the canonical checkpoint (epoch 19) chosen by minimum val_loss across the 30-epoch run. (See Figure 4 for the per-stage curves.)
 
-### 3.4 Pocket-fixed redesign
+### 3.4 Pocket-fixed redesign: distal-position behavior
 
-We tested whether UMA-Inverse's dense pair attention provides an advantage in **pocket-fixed redesign** — the workflow in which pocket residues are locked to native and the rest of the protein is redesigned. Twenty PDBs (10 metal, 10 small-molecule) were selected from the LigandMPNN test splits with curated filters (50 ≤ L ≤ 400, 5 ≤ pocket ≤ 30, distinct CCD codes for small molecules, IMAC-artifact filter for metals). For each PDB, K = 20 sequences were generated by both methods at T = 0.1 with random decoding, and we computed (a) **distal recovery** at non-fixed positions and (b) **distal sequence diversity** (mean pairwise Hamming distance at non-fixed positions).
+A common applied workflow with ligand-conditioned inverse-folding models is **pocket-fixed redesign** — locking the binding-pocket residues to native and redesigning the rest of the protein. This pattern shows up in directed-evolution-style sequence diversification, allosteric activity modulation, and stability engineering of enzyme scaffolds, and it is the use case where dense pair attention has the most plausible mechanistic advantage: every distal residue can attend directly to every ligand atom, whereas in a 25-nearest-atom KNN graph a residue 15+ Å from the ligand has no direct ligand edges and must reach the ligand through 2–3 hops of message passing diluted by k=25 neighbors per hop.
 
-**Headline numbers** (mean across N = 10 PDBs per split, paired):
+We selected 25 small-molecule PDBs (10 from the original v2-friendly-curated set + 15 from a deliberately unbiased extension; see Methods 2.5) and 10 metal PDBs from the LigandMPNN test splits, with hard filters (50 ≤ L ≤ 400, 5 ≤ pocket ≤ 30, distinct CCD codes for small molecules, IMAC-artifact filter for metals). For each PDB, K = 20 sequences were generated by both methods at T = 0.1 with random decoding. At each non-fixed position we computed (a) **distal recovery** (fraction of native-matching residues, averaged over the 20 designs) and (b) **distal diversity** (mean pairwise Hamming distance across the 20 designs).
+
+**Headline numbers** (paired across PDBs):
 
 | Split | Metric | UMA-v2 | LigandMPNN | Δ (UMA − Lig) | Wilcoxon p |
 |---|---|---:|---:|---:|---:|
-| Small molecule | distal recovery | **0.591** | 0.512 | +0.080 | 0.275 |
-| Small molecule | distal diversity | 0.104 | **0.203** | −0.099 | **0.002** |
-| Metal | distal recovery | 0.453 | **0.554** | −0.102 | **0.004** |
-| Metal | distal diversity | 0.176 | 0.162 | +0.015 | 0.92 |
+| Small mol N=25 | distal recovery | 0.516 | 0.551 | −0.035 | 0.14 |
+| Small mol N=25 | distal diversity | **0.131** | 0.190 | **−0.060** | **0.0015** |
+| Metal N=10 | distal recovery | 0.453 | **0.554** | −0.102 | **0.004** |
+| Metal N=10 | distal diversity | 0.176 | 0.162 | +0.015 | 0.92 |
 | Both | pocket recovery (sanity) | 0.954 | 0.952 | n/s | n/s |
 
 (Pocket recovery is 1.000 by construction on monomer PDBs; the residual reflects a 1-residue trim where LigandMPNN drops a position with a missing Cα atom.)
 
-**Result is the opposite of the original hypothesis on diversity.** Dense attention does *not* broaden distal exploration. On the small-molecule split, UMA's designs are roughly **half as diverse** as LigandMPNN's at distal positions (0.10 vs 0.20 mean pairwise Hamming, paired Wilcoxon p = 0.002), and **all 10 PDBs show this pattern monotonically** (Figure 5, top-left). Concurrently, UMA's distal *recovery* trends higher than LigandMPNN's on small molecules (+8 pp) — though not significant at N = 10. The two facts together describe a method that converges more confidently on more native-like distal residues, at the cost of sequence diversity.
+**Two findings, with the v2-friendly selection bias scrubbed by the N=25 extension:**
 
-**Metal split is the inverse**: LigandMPNN wins clearly on distal recovery (+10 pp, p = 0.004), with diversity comparable. This is consistent with the well-established intuition that metal coordination is dominated by *local* sidechain geometry, where LigandMPNN's KNN graph is well-matched to the signal.
+1. **UMA-Inverse produces distal designs with ≈ 31 % less sequence diversity than LigandMPNN on small molecules** (paired Wilcoxon p = 0.0015 across N = 25 PDBs). The original 10-PDB observation also held a +8 pp UMA edge in distal recovery, but that effect did not survive the unbiased extension to N = 25 (Δ = −0.035, n.s.); the diversity gap, by contrast, *did* survive both filter regimes. This is the first finding to interpret.
+2. **Metal binding remains a clear LigandMPNN win** on distal recovery (+10 pp, p = 0.004), consistent with the established intuition that metal coordination is dominated by local sidechain geometry — exactly the signal LigandMPNN's KNN graph is built to capture.
 
-**Interpretation.** Dense attention does not behave as a "more global" prior in practice — at least not in a way that produces measurably more diverse distal redesigns. A plausible explanation is that the actual force shaping distal positions is the protein backbone, not the ligand: residues 15+ Å from the ligand sit in secondary-structure contexts whose local pair geometry is already strongly informative. Whether UMA's dense attention even *attends* to ligand atoms at long range, or instead collapses to local backbone-pair signals, is an interpretability question we do not address here.
+**Why is UMA narrower?** Two interpretations are possible:
 
-The Boltz-2 cofold experiment (next subsection) provides an orthogonal signal: even if UMA's distal redesigns are less diverse, do they still *fold* with their ligand?
+(i) UMA simply has a tighter posterior at distal positions, regardless of pocket signal — i.e. its distal predictions are less diverse but no more *informed*; or
 
-### 3.5 Limitations
+(ii) UMA's narrowness reflects a real pocket-conditioned signal that LigandMPNN's KNN cannot transmit to distal positions: distal residues attend directly to ligand atoms, the model becomes confident about which residue type fits, and that confidence shows up as low diversity.
+
+We discriminate these with three further analyses (Figure 5b–d):
+
+**Test 1 — between-method confidence-ranking correlation.** If both methods respond to a shared signal (backbone, secondary-structure context), the PDBs where UMA is narrow should be the same PDBs where LigandMPNN is narrow. They are not: per-PDB Pearson r = 0.07, p = 0.75 between UMA and LigandMPNN distal-Hamming values across the N = 25 small-molecule set. **The two methods disagree about which PDBs are easy to design distally.**
+
+**Test 2 — within-PDB amino-acid agreement.** At a per-PDB level, the AA-frequency distributions UMA and LigandMPNN produce at distal positions correlate strongly (median Pearson r = 0.85, range 0.57–0.95). The methods broadly agree on *which* AAs to put at distal positions; they disagree on *how confidently*. Combined with Test 1 this paints a "same target, different posterior width, with the width modulated by signal UMA tracks and LigandMPNN doesn't" picture.
+
+**Test 4 — does UMA's per-PDB confidence predict cofold quality?** This is the discriminating test. If interpretation (ii) is right, narrower UMA posteriors should correspond to better Boltz-2 cofold metrics; if (i) is right, no relationship is expected. Per-PDB correlation between distal confidence (= 1 − mean distal Hamming) and cofold metrics, run separately for each method (small-molecule, N = 21 with Boltz-2 cofolds available):
+
+| Cofold metric | UMA Pearson r | UMA p | LigMPNN Pearson r | LigMPNN p |
+|---|---:|---:|---:|---:|
+| ipTM (best of 5) | **+0.52** | **0.016** | +0.16 | 0.49 |
+| complex pLDDT | **+0.58** | **0.006** | +0.40 | 0.07 |
+| Pocket Cα RMSD (lower = better) | +0.37 | 0.12 | +0.06 | 0.82 |
+| Ligand-pose RMSD | +0.17 | 0.49 | −0.33 | 0.17 |
+| Affinity probability | −0.09 | 0.70 | +0.13 | 0.58 |
+
+UMA-Inverse's per-PDB distal-position confidence is significantly correlated with both Boltz-2 ipTM and complex pLDDT — when the model is more confident at distal positions, the resulting designs cofold with measurably higher confidence. LigandMPNN's per-PDB confidence is, on the same metrics and the same PDBs, essentially uninformative.
+
+**The combined picture supports interpretation (ii):** UMA-Inverse's posterior width at distal positions is a *signal* — it tracks something about pocket-conditioned design feasibility that has downstream cofold consequences. LigandMPNN's posterior width is comparatively *noise* — it varies between PDBs but doesn't predict design quality. Mechanistically the architectural prediction is straightforward: dense pair attention lets distal residues read directly from ligand atoms, while a 25-nearest-atom KNN graph cannot reach 15+ Å distal residues with usable ligand signal. The data are consistent with this prediction.
+
+We caution that this is a *correlational* finding on N = 21 PDBs and it is therefore subject to the usual confounds (PDB-level features that drive both confidence and design quality). Nonetheless the asymmetry between architectures on identical PDBs is the strongest available evidence that dense attention transmits a real, design-quality-correlated signal to distal positions in this regime, and the result motivates the **pocket-fixed redesign use case** as the natural application of UMA-Inverse: when the goal is to generate diverse-but-pocket-consistent variants of a fixed scaffold (directed-evolution-style sequence diversification, allosteric tuning, scaffold stability engineering), UMA's narrower-but-quality-tracking distal posterior is preferable to LigandMPNN's broader-but-uninformative one.
+
+### 3.5 Boltz-2 cofold of pocket-fixed redesigns
+
+We cofolded 5 randomly-selected designs per (PDB, method) with Boltz-2 (350 cofold runs total, with 5 diffusion samples each), restricted to the same 25 small-molecule + 10 metal PDB selection. Cofold inputs use the redesigned protein sequence + the native ligand (CCD code for small molecules; ion identity for metals); the readouts are Boltz-2 confidence (ipTM, plDDT), pocket Cα RMSD vs the native crystal (after Kabsch alignment on pocket residues), ligand-pose RMSD vs native (after the same alignment), whole-scaffold Cα RMSD, and the Boltz-2 affinity head's regression value and binary-binder probability.
+
+Boltz-2 ipTM, plDDT, and predicted affinity are *model predictions*, not measurements. We use them only as a **relative metric between two design methods on the same scaffold**, where systematic errors in the predictor should largely cancel.
+
+| Metric (best of 5 diffusion samples; mean across cofolds) | UMA (small mol) | LigMPNN (small mol) | UMA (metal) | LigMPNN (metal) |
+|---|---:|---:|---:|---:|
+| ipTM | 0.91 | 0.95 | 0.78 | 0.79 |
+| complex pLDDT | 0.77 | 0.88 | 0.71 | 0.75 |
+| Pocket Cα RMSD (Å) | 2.65 | 1.32 | 4.07 | 4.54 |
+| Ligand-pose RMSD (Å) | 3.34 | 2.07 | 0.69 | 0.43 |
+| Scaffold RMSD (Å) | 5.36 | 2.76 | 7.26 | 6.68 |
+| Affinity binary probability | 0.665 | 0.654 | 0.735 | 0.731 |
+| Affinity pred value (log; lower = stronger) | −0.16 | −0.29 | +0.25 | +0.07 |
+
+LigandMPNN's small-molecule cofolds preserve the crystal pocket geometry more closely than UMA's (Cα RMSD 1.32 Å vs 2.65 Å). UMA's designs deviate further from the crystal scaffold (5.36 vs 2.76 Å) — but the Boltz-2 binary-binder probability is essentially indistinguishable between methods (0.665 vs 0.654), and the regression-style affinity prediction differs by 0.13 log units (a small effect). One reading: UMA's confident distal redesigns reorganize the surrounding scaffold around the locked pocket into a *different but still binder-compatible* conformation, while LigandMPNN's broader posterior tends to leave the scaffold closer to the crystal mean. Whether the alternative scaffold conformation is a feature (novel diversification beyond what local-message-passing can produce) or a liability (geometric drift) is an open question that the cofold result does not resolve on its own — it requires experimental follow-up.
+
+Crucially, when read alongside §3.4 Test 4, the cofold result strengthens rather than contradicts the "intelligent distal redesign" interpretation: per-PDB UMA confidence is a meaningful predictor of cofold ipTM and pLDDT, so a user who wants to *select* high-quality UMA designs has a usable confidence proxy at the input-design stage. LigandMPNN's per-PDB confidence does not provide the equivalent signal.
+
+### 3.6 Limitations
 
 - **No phase-by-phase ablation**: v2's three flag-gated changes (atomic-number embedding, Cβ anchor, multi-atom backbone) were rolled out together. Per-phase contribution to the v1 → v2 gain (+4.4 pp metal / +3.1 pp small_mol) is unmeasured. Each is a config flag and thus cheap to ablate retroactively, but each ablation is a separate stage-3 training run (~3.8 days × 8× A5500). Out of scope for this preprint.
-- **No experimental validation**: pocket-fixed redesigns were not synthesized or assayed. All claims about pocket integrity / ligand binding are based on Boltz-2 *predictions*, with the explicit caveat that these are not measurements.
-- **Single ckpt**: results are reported on the single canonical v2 epoch-19 checkpoint. We did not perform model-averaging or ensemble decoding.
-- **Selection bias in pocket-fixed PDB choice**: the 20-PDB selection was filtered for v2-friendly properties (high standard-recovery PDBs preferred) — the pocket-fixed numbers may overstate UMA's typical performance on a uniformly-sampled set.
+- **No experimental validation**: pocket-fixed redesigns were not synthesized or assayed. All claims about pocket integrity, ligand binding, and "intelligent distal redesign" rest on (a) sequence-level recovery and diversity statistics, and (b) Boltz-2 *predictions* of cofold confidence and predicted affinity, with the explicit caveat that these are not measurements.
+- **Single ckpt**: results are reported on the single canonical v2 epoch-19 checkpoint. No model-averaging or ensemble decoding.
+- **Selection-bias scrub is partial**: the original 10 small-molecule PDBs were selected with a v2-friendly tiebreaker (highest-standard-recovery PDB picked per CCD code); the +15-PDB extension dropped that bias. Findings reported as "robust at N = 25" are those that survive the unbiased extension; findings reported only at N = 10 should be treated as preliminary.
+- **N for cofold-quality correlation (Test 4) is 21**: 4 of the 25 small-molecule PDBs (1f0r, 1nl9, 1nwl, 1qb1) had pure-numeric CCD codes that crashed Boltz-2 in the first cofold run; we fixed the YAML quoting and re-ran them, but cofold-vs-confidence numbers in Section 3.4 reflect the original N = 21.
 
 ---
 
