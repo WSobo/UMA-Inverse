@@ -120,8 +120,24 @@ def main() -> None:
     else:
         logger.warning("extended sampling record missing; skipping extended cofold metrics")
 
+    # Cofold rerun (the 4 PDBs whose initial extended cofolds failed because
+    # numeric CCD codes were parsed as ints). If present, results overlap
+    # with extended/ for those PDBs (which had no successful outputs there),
+    # so the union is non-redundant.
+    out_rerun = PROJECT_ROOT / "outputs" / "preprint" / "cofold_metrics_rerun.csv"
+    sampling_rerun = (PROJECT_ROOT / "outputs" / "preprint"
+                      / "boltz_inputs" / "cofold_rerun" / "sampling_record.json")
+    if sampling_rerun.exists():
+        _run([
+            "uv", "run", "python", "scripts/preprint/cofold_metrics.py",
+            "--sampling-record", str(sampling_rerun),
+            "--cofold-base", str(PROJECT_ROOT / "outputs" / "preprint" / "cofold_rerun"),
+            "--selection", str(args.combined_selection),
+            "--out", str(out_rerun),
+        ])
+
     combined = PROJECT_ROOT / "outputs" / "preprint" / "cofold_metrics.csv"
-    inputs = [p for p in (out_orig, out_ext) if p.exists()]
+    inputs = [p for p in (out_orig, out_ext, out_rerun) if p.exists()]
     total = _concat_csvs(inputs, combined)
     logger.info("wrote combined cofold metrics: %s  (%d rows)", combined, total)
 
