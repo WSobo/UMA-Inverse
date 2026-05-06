@@ -3,7 +3,25 @@
     "allow": [
       "Bash(rtk ls:*)",
       "Bash(awk -F',' 'NR>1 && $9 ~ /[0-9]/ {lr=$9} END {print \"last lr=\" lr}' logs/csv/pairmixerinv-stage3-nodes384-ddp8/version_0/metrics.csv)",
-      "Bash(awk -F',' 'NR>1 && $1 ~ /^[0-9]+$/ && $4!=\"\" {print $1\",\"$9}' logs/csv/pairmixerinv-stage3-nodes384-ddp8/version_0/metrics.csv)"
+      "Bash(awk -F',' 'NR>1 && $1 ~ /^[0-9]+$/ && $4!=\"\" {print $1\",\"$9}' logs/csv/pairmixerinv-stage3-nodes384-ddp8/version_0/metrics.csv)",
+      "Bash(rtk uv *)",
+      "Bash(sbatch /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/scripts/SLURM/06_smoke_test_v2.sh)",
+      "Bash(sbatch /tmp/run_pytest_v2.sh)",
+      "Bash(python *)",
+      "Read(//private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/**)",
+      "Bash(squeue -j 32531097 --noheader --format=\"%.10i %.2t %.10M %.20R\")",
+      "Bash(awk -F, 'NR>1 && $5!=\"\" {row=$0} END {split\\(row,a,\",\"\\); printf \"step=%-7s  epoch=%-2s  acc_step=%.3f  loss_step=%.3f  grad=%.2f  lr=%.2e\\\\n\",a[3],a[1],a[5],a[8],a[6],a[9]}' /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/csv/pairmixerinv-v2-stage1-nodes64/version_3/metrics.csv)",
+      "Bash(awk -F, 'NR>1 && $11!=\"\" {row=$0} END {split\\(row,a,\",\"\\); printf \"step=%-7s  epoch=%-2s  val/acc=%.3f  val/loss=%.3f\\\\n\",a[3],a[1],a[10],a[11]}' /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/csv/pairmixerinv-v2-stage1-nodes64/version_3/metrics.csv)",
+      "Bash(squeue *)",
+      "Bash(awk -F, 'NR>1 && $10!=\"\" {print \"epoch=\"$1\" step=\"$3\" val_acc=\"$10\" val_loss=\"$11}' /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/csv/pairmixerinv-v2-stage3-nodes384-ddp8/version_0/metrics.csv)",
+      "Bash(sacct *)",
+      "Bash(head -n 215 /private/home/wsobolew/.claude/plans/cool-now-we-can-delegated-ritchie.md)",
+      "Bash(mv /tmp/_plan_new.md /private/home/wsobolew/.claude/plans/cool-now-we-can-delegated-ritchie.md)",
+      "Bash(awk '/sequence:/{print length\\($2\\)}' outputs/preprint/boltz_inputs/cofold/uma_v2/1lqk_sample06.yaml)",
+      "Bash(awk 'NR==2{print length\\($0\\)}' outputs/preprint/uma_pocket_fixed/1lqk/designs.fasta)",
+      "Bash(rm -rf /tmp/cofold_test_method)",
+      "Bash(git commit -m ' *)",
+      "WebSearch"
     ]
   }
 }
