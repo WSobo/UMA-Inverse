@@ -9,7 +9,7 @@ authors:
     affiliation: "Yeh Lab, University of California, Santa Cruz"
     orcid: "https://orcid.org/0000-0000-0000-0000"  # TODO: replace with real ORCID
 license: MIT
-repository-code: "https://github.com/<TBD>/UMA-Inverse"
+repository-code: "https://github.com/WSobo/UMA-Inverse"
 url: "https://huggingface.co/WSobo/UMA-Inverse_v2"
 keywords:
   - protein-design

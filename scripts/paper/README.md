@@ -1,6 +1,6 @@
 # Paper reproduction scripts
 
-This directory contains the scripts used to generate every figure and statistic in the UMA-Inverse bioRxiv preprint ([docs/v2_preprint.md](../../docs/v2_preprint.md)). They are kept here so the paper is fully reproducible from the published checkpoint and the LigandMPNN test-split JSONs.
+This directory contains the scripts used to generate every figure and statistic in the UMA-Inverse bioRxiv preprint (link added on submission). They are kept here so the paper is fully reproducible from the published checkpoint and the LigandMPNN test-split JSONs.
 
 These scripts are **not** required to use UMA-Inverse — for inference, see the top-level [README](../../README.md). They are also not part of the public API; expect rough edges and hardcoded HPC paths in places.
 
@@ -38,7 +38,7 @@ The pocket-fixed redesign experiment (paper §3.4–§3.5) was produced in this 
    - `figures/fig5_pocket_distal.py` — pocket-fixed distal-diversity violins + scatter
    - `figures/fig6_cofold.py` — Boltz-2 cofold metrics
 
-Figure 1 (architecture diagram) lives at [`docs/fig1_architecture.tex`](../../docs/fig1_architecture.tex) — a standalone TikZ source.
+Figure 1 (architecture diagram) is generated from a standalone TikZ source kept with the preprint working files (outside this repo).
 
 ## Outputs
 

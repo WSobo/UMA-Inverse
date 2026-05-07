@@ -1,6 +1,6 @@
 # UMA-Inverse: Architecture & Science
 
-> **Context:** UMA-Inverse is a ligand-conditioned protein inverse-folding model — given a fixed protein-ligand backbone, it predicts what amino acid sequence best complements that structure. It upgrades LigandMPNN's graph-message-passing backbone with PairMixer, a dense pair-representation encoder from [Genesis / Pearl (ICLR 2026)](./iclr2026_conference.tex).
+> **Context:** UMA-Inverse is a ligand-conditioned protein inverse-folding model — given a fixed protein-ligand backbone, it predicts what amino acid sequence best complements that structure. It upgrades LigandMPNN's graph-message-passing backbone with PairMixer, a dense pair-representation encoder.
 
 ---
 

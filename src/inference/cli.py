@@ -50,6 +50,7 @@ from src.inference.output import (
     write_samples_fasta,
 )
 from src.inference.session import InferenceSession
+from src.inference.weights import resolve_checkpoint
 
 app = typer.Typer(
     add_completion=False,
@@ -240,9 +241,10 @@ def design(
         None, "--pdb-list", exists=True, dir_okay=False, readable=True,
         help="Batch JSON: {pdb_path: {overrides...}} or {pdb_path: {}}.",
     ),
-    ckpt: Path = typer.Option(
-        ..., "--ckpt", exists=True, dir_okay=False, readable=True,
-        help="Checkpoint file (.ckpt) produced by training.",
+    ckpt: Path | None = typer.Option(
+        None, "--ckpt", dir_okay=False, readable=True,
+        help="Checkpoint file (.ckpt). If omitted, the canonical v2 weights "
+             "are fetched from Hugging Face into ~/.cache/uma-inverse/ on first run.",
     ),
     out_dir: Path = typer.Option(
         Path("outputs"), "--out-dir", file_okay=False,
@@ -340,6 +342,7 @@ def design(
     run_dir = _resolve_run_dir(out_dir, run_name, run_stem)
 
     # ── Session ─────────────────────────────────────────────────────────────
+    ckpt = resolve_checkpoint(ckpt)
     logger.info("loading checkpoint: %s", ckpt)
     session = InferenceSession.from_checkpoint(
         config_path=config_path, checkpoint=ckpt, device=device,
@@ -449,9 +452,10 @@ def score(
         ..., "--pdb", exists=True, dir_okay=False, readable=True,
         help="PDB file to score against.",
     ),
-    ckpt: Path = typer.Option(
-        ..., "--ckpt", exists=True, dir_okay=False, readable=True,
-        help="Checkpoint file.",
+    ckpt: Path | None = typer.Option(
+        None, "--ckpt", dir_okay=False, readable=True,
+        help="Checkpoint file (.ckpt). If omitted, the canonical v2 weights "
+             "are fetched from Hugging Face into ~/.cache/uma-inverse/ on first run.",
     ),
     config_path: Path = typer.Option(
         Path("configs/config.yaml"), "--config",
@@ -489,6 +493,7 @@ def score(
 
     run_dir = _resolve_run_dir(out_dir, run_name, f"{pdb.stem}-score")
 
+    ckpt = resolve_checkpoint(ckpt)
     session = InferenceSession.from_checkpoint(
         config_path=config_path, checkpoint=ckpt, device=device,
     )

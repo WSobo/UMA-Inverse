@@ -22,7 +22,9 @@
       "Bash(rm -rf /tmp/cofold_test_method)",
       "Bash(git commit -m ' *)",
       "WebSearch",
-      "Bash(xargs ls -lh)"
+      "Bash(xargs ls -lh)",
+      "Bash(git status *)",
+      "Bash(sbatch *)"
     ]
   }
 }

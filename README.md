@@ -4,31 +4,23 @@
 
 Given a fixed protein–ligand backbone, UMA-Inverse predicts per-residue amino-acid identity (20 AA + X) under optional design constraints. The architecture is a single dense PairMixer encoder over the union of residue and ligand-atom nodes — no KNN sparsification — providing every residue a direct edge to every ligand atom. Built and trained on the LigandMPNN data protocol (parser, train/valid/test splits) so numbers are directly comparable.
 
-→ Preprint: [docs/v2_preprint.md](docs/v2_preprint.md) (architecture, benchmarks, pocket-fixed redesign experiment)
+→ Preprint: bioRxiv (link added on submission)
 
 ---
 
 ## Install
 
-Requires Python 3.13 and [uv](https://github.com/astral-sh/uv).
+Requires Python 3.13. [uv](https://github.com/astral-sh/uv) is recommended (fast, lockfile-reproducible):
 
 ```bash
-git clone <repo-url> UMA-Inverse
+git clone https://github.com/WSobo/UMA-Inverse.git
 cd UMA-Inverse
 uv sync                        # installs the package + deps from uv.lock
 ```
 
-Then download the trained weights from [Hugging Face](https://huggingface.co/WSobo/UMA-Inverse_v2):
+If you don't have uv, plain pip works too: `pip install -e .` (uses the same `pyproject.toml`, no lockfile guarantee).
 
-```bash
-uv run python scripts/download_weights.py
-```
-
-After download, the canonical checkpoint lives at:
-
-```
-checkpoints/uma-inverse-v2.ckpt
-```
+Trained weights live on [Hugging Face](https://huggingface.co/WSobo/UMA-Inverse_v2) and are **auto-fetched on first inference** into `~/.cache/uma-inverse/uma-inverse-v2.ckpt`. No separate setup step is required. To pre-fetch explicitly (e.g. for offline machines), run `uv run python scripts/download_weights.py`.
 
 GPU is recommended (any CUDA-capable card with ≥8 GB; the v2 model fits comfortably on a single A5500). CPU inference works but is ~50× slower.
 
@@ -41,11 +33,12 @@ Design 10 sequences for a PDB at `T = 0.1` with random decoding order (matches t
 ```bash
 uv run uma-inverse design \
     --pdb my_complex.pdb \
-    --ckpt checkpoints/uma-inverse-v2.ckpt \
     --num-samples 10 \
     --temperature 0.1 \
     --seed 42
 ```
+
+The first call downloads the default checkpoint (~25 MB) and caches it; subsequent calls reuse it. Pass `--ckpt path/to/your.ckpt` to override.
 
 Outputs are written under `outputs/<pdb-stem>-<timestamp>/`:
 
@@ -94,7 +87,7 @@ UMA-Inverse exposes two subcommands: `design` (sample sequences) and `score` (co
 
 ```bash
 uv run uma-inverse design \
-    --pdb my_complex.pdb --ckpt checkpoints/uma-inverse-v2.ckpt \
+    --pdb my_complex.pdb \
     --fix "A12 A14 A56 A89 A124" \
     --num-samples 20 --temperature 0.1
 ```
@@ -105,7 +98,6 @@ uv run uma-inverse design \
 # spec.json: {"path/to/a.pdb": {}, "path/to/b.pdb": {"fix": "A1 A2"}, ...}
 uv run uma-inverse design \
     --pdb-list spec.json \
-    --ckpt checkpoints/uma-inverse-v2.ckpt \
     --out-dir outputs/screen \
     --num-samples 5 \
     --resume    # skip PDBs already recorded in .done.txt
@@ -119,18 +111,16 @@ Compute autoregressive log-likelihoods of the native (or a user-supplied) sequen
 # Score the native sequence (averaged over 10 random decoding orders)
 uv run uma-inverse score \
     --pdb my_complex.pdb \
-    --ckpt checkpoints/uma-inverse-v2.ckpt \
     --mode autoregressive \
     --num-batches 10
 
 # Score a custom sequence
 uv run uma-inverse score \
     --pdb my_complex.pdb \
-    --ckpt checkpoints/uma-inverse-v2.ckpt \
     --sequence "MKVL...QED"
 
 # Single-AA scoring (each position scored with all others held native)
-uv run uma-inverse score --pdb my_complex.pdb --ckpt ... --mode single-aa
+uv run uma-inverse score --pdb my_complex.pdb --mode single-aa
 ```
 
 Writes `scores_<pdb>.csv` (per-position log-likelihoods) and `scores_<pdb>.json` (summary).
@@ -159,7 +149,7 @@ Standard interface-recovery benchmark (LigandMPNN test splits, 10 designs per PD
 | Metal | 0.486 | 0.775 | 0.406 |
 | Small molecule | 0.538 | 0.633 | 0.505 |
 
-The preprint characterizes a regime — **pocket-fixed redesign** — where UMA-Inverse's dense attention shows a structural advantage that local KNN message-passing does not capture; see [docs/v2_preprint.md](docs/v2_preprint.md) §3.4–3.5 for details.
+The preprint (bioRxiv, link added on submission) characterizes a regime — **pocket-fixed redesign** — where UMA-Inverse's dense attention shows a structural advantage that local KNN message-passing does not capture.
 
 ---
 
