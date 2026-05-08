@@ -61,7 +61,13 @@ def main(cfg: DictConfig) -> None:
         residue_anchor=str(cfg.data.get("residue_anchor", "ca")),
         return_backbone_coords=(
             str(cfg.data.get("pair_distance_atoms", "anchor_only")) == "backbone_full"
+            or str(cfg.data.get("pair_distance_atoms_ligand", "anchor_only")) == "backbone_full"
+            or bool(cfg.data.get("frame_relative_angles", False))
         ),
+        # v3 flags — defaults off, mirror scripts/train.py.
+        return_frame_relative_angles=bool(cfg.data.get("frame_relative_angles", False)),
+        sidechain_context_rate=float(cfg.data.get("sidechain_context_rate", 0.0)),
+        aug_seed=int(cfg.get("seed", 0)),
     )
 
     # Pilot-specific overrides:

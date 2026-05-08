@@ -25,7 +25,7 @@ make test
 ```
 
 ## Do Not Touch
-These directories are **reference implementations only** — never read or modify:
+These directories are **reference implementations only** — never modify:
 - `LigandMPNN/` — only its `training/train.json` and `training/valid.json` split files are used at runtime
 - `Struct2Seq-GNN/`
 - `UMA-Fold/`

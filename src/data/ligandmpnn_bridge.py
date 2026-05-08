@@ -108,6 +108,58 @@ def _encode_ligand_atomic_numbers(y_t: torch.Tensor) -> torch.Tensor:
     return y_t.long()
 
 
+def _compute_frame_relative_angles(
+    backbone_coords: torch.Tensor,  # [L, 4, 3]
+    ligand_coords: torch.Tensor,    # [M, 3]
+) -> torch.Tensor:                  # [L, M, 4]
+    """v3 phase 2 — frame-relative ligand-atom features.
+
+    Direct port of LigandMPNN's ``_make_angle_features(N, Cα, C, Y)``
+    (model_utils.py:1123-1147). Builds a per-residue local frame where
+    e1 = unit(N - Cα), e2 = ⊥-to-e1 component of (C - Cα), e3 = e1 × e2,
+    projects (Y - Cα) onto each axis, and emits 4 features per
+    (residue, ligand-atom) pair:
+
+        f1 = local[0] / rxy        # cos(azimuth)
+        f2 = local[1] / rxy        # sin(azimuth)
+        f3 = rxy / rxyz            # sin(polar)
+        f4 = local[2] / rxyz       # cos(polar)
+
+    where rxy = √(local[0]² + local[1]²) and rxyz = ‖local‖. Output ordering
+    matches LigandMPNN exactly so weight transfer / direct comparison is
+    well-defined.
+    """
+    n  = backbone_coords[:, 0, :]
+    ca = backbone_coords[:, 1, :]
+    c  = backbone_coords[:, 2, :]
+
+    L = ca.shape[0]
+    M = ligand_coords.shape[0]
+    if M == 0 or L == 0:
+        return torch.zeros((L, M, 4), dtype=ligand_coords.dtype, device=ligand_coords.device)
+
+    v1 = n - ca                                       # toward N
+    v2 = c - ca                                       # toward C
+    e1 = v1 / (torch.linalg.norm(v1, dim=-1, keepdim=True) + 1e-8)
+    e1_v2_dot = (e1 * v2).sum(dim=-1, keepdim=True)
+    u2 = v2 - e1 * e1_v2_dot
+    e2 = u2 / (torch.linalg.norm(u2, dim=-1, keepdim=True) + 1e-8)
+    e3 = torch.linalg.cross(e1, e2, dim=-1)
+
+    frame = torch.stack([e1, e2, e3], dim=-1)         # [L, 3, 3] (cartesian, axis)
+    rel = ligand_coords.unsqueeze(0) - ca.unsqueeze(1)  # [L, M, 3]
+    # local[l, m, p] = sum_q frame[l, q, p] * rel[l, m, q]
+    local = torch.einsum("lqp,lmq->lmp", frame, rel)  # [L, M, 3]
+
+    rxy  = torch.sqrt(local[..., 0] ** 2 + local[..., 1] ** 2 + 1e-8)
+    rxyz = torch.linalg.norm(local, dim=-1) + 1e-8
+    f1 = local[..., 0] / rxy
+    f2 = local[..., 1] / rxy
+    f3 = rxy / rxyz
+    f4 = local[..., 2] / rxyz
+    return torch.stack([f1, f2, f3, f4], dim=-1)      # [L, M, 4]
+
+
 def _construct_virtual_cb(x: torch.Tensor) -> torch.Tensor:
     """Construct virtual Cβ positions from N, Cα, C using ProteinMPNN's formula.
 
@@ -177,6 +229,7 @@ def load_example_from_pdb(
     ligand_featurizer: str = "onehot6",
     residue_anchor: str = "ca",
     return_backbone_coords: bool = False,
+    return_frame_relative_angles: bool = False,
 ) -> dict[str, object]:
     """Featurize a single PDB file into model-ready tensors.
 
@@ -285,8 +338,11 @@ def load_example_from_pdb(
     residue_features = _compute_backbone_dihedrals(x)[residue_mask]  # [L_valid, 6]
     sequence         = parsed["S"][residue_mask].long()        # [L_valid]
     design_mask      = chain_mask[residue_mask].bool()         # [L_valid]
+    # backbone tensor is needed by either the v2 multi-atom pair path
+    # (return_backbone_coords) or the v3 frame-angle path. Compute once.
+    needs_backbone_internal = return_backbone_coords or return_frame_relative_angles
     residue_backbone_coords: torch.Tensor | None = (
-        x[residue_mask] if return_backbone_coords else None    # [L_valid, 4, 3]
+        x[residue_mask] if needs_backbone_internal else None    # [L_valid, 4, 3]
     )
 
     residue_ids_valid: list[str] | None = None
@@ -349,6 +405,15 @@ def load_example_from_pdb(
     if residue_backbone_coords is not None:
         residue_backbone_coords = residue_backbone_coords[keep_idx]
 
+    residue_ligand_frame_angles: torch.Tensor | None = None
+    if return_frame_relative_angles:
+        # Compute over the cropped residue + ligand sets to keep the tensor
+        # aligned with the model's [L, M, 4] expectation.
+        residue_ligand_frame_angles = _compute_frame_relative_angles(
+            backbone_coords=residue_backbone_coords,
+            ligand_coords=ligand_coords,
+        )
+
     if residue_ids_valid is not None:
         keep_indices = keep_idx.tolist()
         residue_ids_valid = [residue_ids_valid[i] for i in keep_indices]
@@ -370,8 +435,10 @@ def load_example_from_pdb(
         output["ligand_features"] = ligand_repr_tensor.float()
     else:  # "atomic_number_embedding"
         output["ligand_atomic_numbers"] = ligand_repr_tensor.long()
-    if residue_backbone_coords is not None:
+    if return_backbone_coords and residue_backbone_coords is not None:
         output["residue_backbone_coords"] = residue_backbone_coords.float()
+    if residue_ligand_frame_angles is not None:
+        output["residue_ligand_frame_angles"] = residue_ligand_frame_angles.float()
     if residue_ids_valid is not None:
         output["residue_ids"] = residue_ids_valid
     return output

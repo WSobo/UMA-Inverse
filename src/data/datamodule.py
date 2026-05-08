@@ -101,6 +101,40 @@ def _apply_runtime_crop(item: dict[str, torch.Tensor], max_total_nodes: int) -> 
     # aligned with residue_coords/residue_features.
     if "residue_backbone_coords" in item:
         out["residue_backbone_coords"] = item["residue_backbone_coords"][keep]
+    # v3 phase 2: frame-relative angles are [L, M, 4] — crop the L axis only.
+    if "residue_ligand_frame_angles" in item:
+        out["residue_ligand_frame_angles"] = item["residue_ligand_frame_angles"][keep]
+    return out
+
+
+def _apply_sidechain_context_aug(
+    item: dict[str, torch.Tensor],
+    rate: float,
+    rng: random.Random,
+) -> dict[str, torch.Tensor]:
+    """v3 phase 5 — expose ~`rate` fraction of designable residues' native AA
+    in the AR context. Mutates a shallow copy of `item` to add a
+    ``sidechain_context_mask`` [L] boolean tensor (true = visible to all
+    decoding-order positions). The target sequence and design_mask are
+    unchanged — those residues are still part of the loss.
+    """
+    if rate <= 0.0:
+        return item
+    L = item["residue_coords"].shape[0]
+    if L == 0:
+        return item
+    out = dict(item)
+    design_mask = out["design_mask"].bool()
+    designable = design_mask.nonzero(as_tuple=False).flatten().tolist()
+    if not designable:
+        out["sidechain_context_mask"] = torch.zeros(L, dtype=torch.bool)
+        return out
+    n_keep = max(0, int(round(len(designable) * rate)))
+    chosen = rng.sample(designable, k=min(n_keep, len(designable)))
+    mask = torch.zeros(L, dtype=torch.bool)
+    if chosen:
+        mask[torch.tensor(chosen, dtype=torch.long)] = True
+    out["sidechain_context_mask"] = mask
     return out
 
 
@@ -116,6 +150,10 @@ class UMAInverseDataset(Dataset):
         ligand_featurizer: str = "onehot6",
         residue_anchor: str = "ca",
         return_backbone_coords: bool = False,
+        return_frame_relative_angles: bool = False,
+        sidechain_context_rate: float = 0.0,
+        is_training: bool = False,
+        aug_seed: int = 0,
     ) -> None:
         self.pdb_dir = pdb_dir
         self.processed_dir = processed_dir
@@ -125,6 +163,12 @@ class UMAInverseDataset(Dataset):
         self.ligand_featurizer = ligand_featurizer
         self.residue_anchor = residue_anchor
         self.return_backbone_coords = return_backbone_coords
+        # v3 phase 2/5 — augmentation gates. sidechain_context_rate is applied
+        # only when is_training=True so val never sees augmentation.
+        self.return_frame_relative_angles = return_frame_relative_angles
+        self.sidechain_context_rate = float(sidechain_context_rate)
+        self.is_training = bool(is_training)
+        self._aug_rng = random.Random(int(aug_seed))
 
         ids = load_json_ids(json_path)
         self.pdb_ids = [
@@ -252,6 +296,15 @@ class UMAInverseDataset(Dataset):
         else:
             out.pop("residue_backbone_coords", None)
 
+        # v3 phase 2: frame-relative angles. Cache may not have them (older
+        # caches predate v3); return None to force slow-path recomputation
+        # when the current config asks for the feature.
+        if self.return_frame_relative_angles:
+            if "residue_ligand_frame_angles" not in out:
+                return None
+        else:
+            out.pop("residue_ligand_frame_angles", None)
+
         return out
 
     def __getitem__(self, idx: int, _depth: int = 0) -> dict[str, torch.Tensor]:
@@ -280,6 +333,10 @@ class UMAInverseDataset(Dataset):
                 # cross-entropy-over-zero-valid-tokens. Skip them.
                 if item is not None and item["residue_coords"].shape[0] > 0:
                     item = _apply_runtime_crop(item, self.max_total_nodes)
+                    if self.is_training and self.sidechain_context_rate > 0.0:
+                        item = _apply_sidechain_context_aug(
+                            item, self.sidechain_context_rate, self._aug_rng,
+                        )
                     item["pdb_id"] = pdb_id
                     return item
                 # Cache can't satisfy the current flags or has 0 residues —
@@ -306,12 +363,17 @@ class UMAInverseDataset(Dataset):
                 ligand_featurizer=self.ligand_featurizer,
                 residue_anchor=self.residue_anchor,
                 return_backbone_coords=self.return_backbone_coords,
+                return_frame_relative_angles=self.return_frame_relative_angles,
             )
         except (ValueError, OSError, RuntimeError) as e:
             logger.warning("Failed to featurize %s (%s) — sampling replacement", pdb_id, e)
             _log_failed_pdb(pdb_id, f"featurize_error:{type(e).__name__}:{e}")
             return self.__getitem__(random.randrange(len(self.pdb_ids)), _depth + 1)
 
+        if self.is_training and self.sidechain_context_rate > 0.0:
+            item = _apply_sidechain_context_aug(
+                item, self.sidechain_context_rate, self._aug_rng,
+            )
         item["pdb_id"] = pdb_id
         return item
 
@@ -360,6 +422,25 @@ def _pad_3d(
     return out
 
 
+def _pad_lm_features(
+    items: list[torch.Tensor],
+    max_l: int,
+    max_m: int,
+    feat_dim: int,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    """Pad a list of [L_i, M_i, D] tensors into [B, max_l, max_m, D].
+
+    Used for the v3 frame-relative angle tensor [L, M, 4] which is variable
+    in *both* the residue and ligand-atom dimensions across a batch.
+    """
+    out = torch.zeros((len(items), max_l, max_m, feat_dim), dtype=dtype)
+    for i, t in enumerate(items):
+        if t.shape[0] > 0 and t.shape[1] > 0:
+            out[i, : t.shape[0], : t.shape[1], :] = t
+    return out
+
+
 def collate_batch(batch: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
     """Pad a list of variable-length samples into a single batch dict.
 
@@ -372,6 +453,8 @@ def collate_batch(batch: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tenso
 
     uses_embedding = "ligand_atomic_numbers" in batch[0]
     uses_backbone = "residue_backbone_coords" in batch[0]
+    uses_frame_angles = "residue_ligand_frame_angles" in batch[0]
+    uses_sidechain_aug = "sidechain_context_mask" in batch[0]
 
     out = {
         "residue_coords":   _pad_2d([b["residue_coords"]   for b in batch], max_res, 3, torch.float32),
@@ -399,6 +482,16 @@ def collate_batch(batch: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tenso
         out["residue_backbone_coords"] = _pad_3d(
             [b["residue_backbone_coords"] for b in batch], max_res, 4, 3, torch.float32,
         )
+    if uses_frame_angles:
+        out["residue_ligand_frame_angles"] = _pad_lm_features(
+            [b["residue_ligand_frame_angles"] for b in batch],
+            max_res, max_lig, 4, torch.float32,
+        )
+    if uses_sidechain_aug:
+        out["sidechain_context_mask"] = _pad_1d(
+            [b["sidechain_context_mask"].to(torch.bool) for b in batch],
+            max_res, torch.bool,
+        )
     return out
 
 
@@ -420,6 +513,9 @@ class UMAInverseDataModule(pl.LightningDataModule):
         ligand_featurizer: str = "onehot6",
         residue_anchor: str = "ca",
         return_backbone_coords: bool = False,
+        return_frame_relative_angles: bool = False,
+        sidechain_context_rate: float = 0.0,
+        aug_seed: int = 0,
     ) -> None:
         super().__init__()
         self.train_json = train_json
@@ -435,11 +531,14 @@ class UMAInverseDataModule(pl.LightningDataModule):
         self.ligand_featurizer = ligand_featurizer
         self.residue_anchor = residue_anchor
         self.return_backbone_coords = return_backbone_coords
+        self.return_frame_relative_angles = return_frame_relative_angles
+        self.sidechain_context_rate = float(sidechain_context_rate)
+        self.aug_seed = int(aug_seed)
 
         self.train_dataset: UMAInverseDataset | None = None
         self.valid_dataset: UMAInverseDataset | None = None
 
-    def _make_dataset(self, json_path: str) -> UMAInverseDataset:
+    def _make_dataset(self, json_path: str, *, is_training: bool) -> UMAInverseDataset:
         return UMAInverseDataset(
             json_path=json_path,
             pdb_dir=self.pdb_dir,
@@ -450,12 +549,16 @@ class UMAInverseDataModule(pl.LightningDataModule):
             ligand_featurizer=self.ligand_featurizer,
             residue_anchor=self.residue_anchor,
             return_backbone_coords=self.return_backbone_coords,
+            return_frame_relative_angles=self.return_frame_relative_angles,
+            sidechain_context_rate=self.sidechain_context_rate,
+            is_training=is_training,
+            aug_seed=self.aug_seed,
         )
 
     def setup(self, stage: str | None = None) -> None:
         if stage in (None, "fit"):
-            self.train_dataset = self._make_dataset(self.train_json)
-            self.valid_dataset = self._make_dataset(self.valid_json)
+            self.train_dataset = self._make_dataset(self.train_json, is_training=True)
+            self.valid_dataset = self._make_dataset(self.valid_json, is_training=False)
 
     def train_dataloader(self) -> DataLoader:
         if self.train_dataset is None:

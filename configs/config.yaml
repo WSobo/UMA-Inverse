@@ -26,6 +26,9 @@ training:
   warmup_steps: 1000
   T_max: 280000
   early_stop_patience: 10
+  # v3 phase 4 — Gaussian σ (Å) noise added to raw residue + ligand coords
+  # at the top of forward(), training-only. 0.0 disables. v3 default = 0.1.
+  coord_noise_std: 0.0
 
 wandb:
   enabled: false   # set true to log runs; mode: offline avoids network req on HPC
@@ -49,6 +52,11 @@ model:
   ligand_featurizer: ${data.ligand_featurizer}
   residue_anchor: ${data.residue_anchor}
   pair_distance_atoms: ${data.pair_distance_atoms}
+  # v3 phase 1/2/3/4 mirrors — data layer is authoritative.
+  pair_distance_atoms_ligand: ${data.pair_distance_atoms_ligand}
+  frame_relative_angles: ${data.frame_relative_angles}
+  intra_ligand_multidist: false
+  coord_noise_std: ${training.coord_noise_std}
 
 data:
   batch_size: 8
@@ -73,6 +81,19 @@ data:
   # single-atom (ligand atoms have no backbone analogue). Phase 2 still
   # governs the residue-ligand anchor under backbone_full. v2 default.
   pair_distance_atoms: backbone_full
+  # v3 phase 1 — when "backbone_full", the residue-ligand [L,M]/[M,L] block
+  # uses 5 backbone-atom × ligand-atom distances instead of the single
+  # Cβ-anchor. "anchor_only" keeps v2 behaviour (single-atom). v3 default =
+  # "backbone_full".
+  pair_distance_atoms_ligand: anchor_only
+  # v3 phase 2 — per-(residue, ligand atom) sin/cos features describing the
+  # ligand atom's bearing in the residue's local N-Cα-C frame, concatenated
+  # into the [L,M] pair-tensor block. v3 default = true.
+  frame_relative_angles: false
+  # v3 phase 5 — fraction of designable residues whose native AA is exposed
+  # in the AR context during training (forces conditional-decoding handling
+  # at design time). Train-only. v3 default = 0.03.
+  sidechain_context_rate: 0.0
 
 inference:
   temperature: 0.1

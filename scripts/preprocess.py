@@ -64,6 +64,9 @@ def _process_one(
             ligand_featurizer="atomic_number_embedding",
             residue_anchor="ca",
             return_backbone_coords=True,
+            # v3 phase 2 — emit frame angles in the union cache so v3 runs
+            # don't have to fall through to the slow on-the-fly PDB parse.
+            return_frame_relative_angles=True,
         )
         # Synthesize the v1 onehot6 features from the atomic numbers so the
         # cache can serve either featurizer selection. For zero-ligand
