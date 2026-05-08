@@ -309,12 +309,15 @@ def load_example_from_pdb(
             Required for inference-time chain-letter residue selection
             (fixed/redesigned residues, per-residue bias/omit). The training
             pipeline leaves this False to avoid the small per-batch overhead.
-        ligand_featurizer: ``"onehot6"`` (v1 default) or
-            ``"atomic_number_embedding"`` (v2 phase 1). The onehot path emits
-            a ``[M, 6]`` float tensor under key ``ligand_features``; the
-            embedding path emits ``[M]`` int64 atomic numbers under key
-            ``ligand_atomic_numbers``. Mutually exclusive — only one of the
-            two keys is present in the returned dict.
+        ligand_featurizer: ``"onehot6"`` (v1 default), ``"atomic_number_embedding"``
+            (v2 phase 1), or ``"ligandmpnn_atomic"`` (v3 LigandMPNN-faithful).
+            The onehot path emits a ``[M, 6]`` float tensor under key
+            ``ligand_features``; the other two paths emit ``[M]`` int64 atomic
+            numbers under key ``ligand_atomic_numbers`` (the v3 model's
+            ``LigandMPNNAtomicFeaturizer`` derives group + period from atomic
+            number internally, so the slow-path tensor is the same as the
+            embedding featurizer). Mutually exclusive — only one of the two
+            keys is present in the returned dict.
         residue_anchor: ``"ca"`` (v1 default) or ``"cb"`` (v2 phase 2).
             Controls which atom is used as the per-residue anchor for
             ``residue_coords``. ``"ca"`` emits the Cα position unchanged;
@@ -354,10 +357,10 @@ def load_example_from_pdb(
         * ``sidechain_residue_idx``    ``[K]``           int64 residue indices in 0..L-1
         * ``residue_ids``              ``List[str]`` (when ``return_residue_ids=True``)
     """
-    if ligand_featurizer not in ("onehot6", "atomic_number_embedding"):
+    if ligand_featurizer not in ("onehot6", "atomic_number_embedding", "ligandmpnn_atomic"):
         raise ValueError(
             f"unknown ligand_featurizer={ligand_featurizer!r}; "
-            "expected 'onehot6' or 'atomic_number_embedding'"
+            "expected 'onehot6', 'atomic_number_embedding', or 'ligandmpnn_atomic'"
         )
     if residue_anchor not in ("ca", "cb"):
         raise ValueError(
@@ -452,7 +455,11 @@ def load_example_from_pdb(
 
     if ligand_featurizer == "onehot6":
         ligand_repr_tensor = _encode_ligand_elements(ligand_elements)
-    else:  # "atomic_number_embedding" — validated at function entry
+    else:  # "atomic_number_embedding" or "ligandmpnn_atomic" — validated at entry.
+        # Both the embedding and ligandmpnn_atomic featurizers consume raw
+        # atomic numbers (the LigandMPNNAtomicFeaturizer derives group + period
+        # internally from the atomic number), so the slow path emits the same
+        # tensor for both.
         ligand_repr_tensor = _encode_ligand_atomic_numbers(ligand_elements)
 
     max_residues = max(1, max_total_nodes - ligand_coords.shape[0])
@@ -511,7 +518,7 @@ def load_example_from_pdb(
     }
     if ligand_featurizer == "onehot6":
         output["ligand_features"] = ligand_repr_tensor.float()
-    else:  # "atomic_number_embedding"
+    else:  # "atomic_number_embedding" or "ligandmpnn_atomic"
         output["ligand_atomic_numbers"] = ligand_repr_tensor.long()
     if return_backbone_coords and residue_backbone_coords is not None:
         output["residue_backbone_coords"] = residue_backbone_coords.float()
