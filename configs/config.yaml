@@ -90,9 +90,15 @@ data:
   # ligand atom's bearing in the residue's local N-Cα-C frame, concatenated
   # into the [L,M] pair-tensor block. v3 default = true.
   frame_relative_angles: false
-  # v3 phase 5 — fraction of designable residues whose native AA is exposed
-  # in the AR context during training (forces conditional-decoding handling
-  # at design time). Train-only. v3 default = 0.03.
+  # v3 phase 5 — when true, the parser/cache emits per-residue sidechain
+  # heavy-atom tensors. Required for sidechain_context_rate > 0 (the
+  # geometric augmentation appends a random fraction of these atoms to
+  # ligand_coords during training). v3 default = true.
+  return_sidechain_atoms: false
+  # v3 phase 5 — fraction of designable residues whose sidechain heavy atoms
+  # are appended to ligand_coords during training (forces the model to handle
+  # conditional decoding from real sidechain geometry, à la LigandMPNN's
+  # use_side_chains). Train-only. v3 default = 0.03.
   sidechain_context_rate: 0.0
 
 inference:

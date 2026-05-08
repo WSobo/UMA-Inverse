@@ -107,6 +107,13 @@ def parse_pdb(
         * ``Y_t``            ``[M]`` int64 atomic numbers.
         * ``Y_m``            ``[M]`` bool — True for atoms within
           *cutoff_for_score* Å of any Cα.
+        * ``sidechain_coords``         ``[K, 3]`` per-residue sidechain heavy-atom
+          coordinates (everything except N/CA/C/O, hydrogens excluded).
+        * ``sidechain_atomic_numbers`` ``[K]`` int64 atomic numbers.
+        * ``sidechain_residue_idx``    ``[K]`` int64 — index into the parsed
+          residue list (0..L_parsed-1) identifying which residue each
+          sidechain atom belongs to. Used by the v3 sidechain-context
+          augmentation.
 
     Raises:
         ImportError: If BioPython is not installed.
@@ -134,6 +141,11 @@ def parse_pdb(
     residue_meta: list[tuple[str, int, str]] = []  # (chain_id, res_num, insertion_code)
     ca_coords_list: list[torch.Tensor] = []                   # valid Cα positions
     ligand_atoms: list[tuple[torch.Tensor, int]] = []         # (coord[3], atomic_num)
+    # Per-residue sidechain heavy atoms — collected as (coord, atomic_num, parsed_residue_idx)
+    # in the order residues are appended to backbone_rows. Atoms are filtered to
+    # match LigandMPNN: backbone (N/CA/C/O) excluded, hydrogens excluded, zero-occupancy
+    # respects include_zero_occupancy. Used by the v3 sidechain-context augmentation.
+    sidechain_atoms: list[tuple[torch.Tensor, int, int]] = []
 
     for chain in model:
         chain_id = chain.get_id()
@@ -163,8 +175,23 @@ def parse_pdb(
                             ca_ok = True
                             ca_coords_list.append(coords[1].clone())
 
+                parsed_idx = len(backbone_rows)  # index this residue will occupy
                 backbone_rows.append((coords, token, ca_ok))
                 residue_meta.append((chain_id, int(res_num), icode.strip()))
+
+                # Collect sidechain heavy atoms (everything not in N/CA/C/O, no H/D).
+                for atom in residue.get_atoms():
+                    name = atom.get_name().strip()
+                    if name in _BACKBONE_ATOMS:
+                        continue
+                    if not include_zero_occupancy and atom.get_occupancy() == 0.0:
+                        continue
+                    elem_raw = (atom.element or atom.get_name()[0]).strip().upper()
+                    if elem_raw in ("H", "D"):
+                        continue
+                    atomic_num = _ELEM_TO_ATOMIC_NUM.get(elem_raw, 119)
+                    sc_coord = torch.tensor(atom.get_coord(), dtype=torch.float32)
+                    sidechain_atoms.append((sc_coord, atomic_num, parsed_idx))
 
             elif het_flag == "W":
                 # Water — skip
@@ -206,6 +233,15 @@ def parse_pdb(
         Y = torch.zeros((0, 3), dtype=torch.float32)
         Y_t = torch.zeros(0, dtype=torch.long)
 
+    if sidechain_atoms:
+        sc_coords = torch.stack([a[0] for a in sidechain_atoms])                          # [K, 3]
+        sc_atomic = torch.tensor([a[1] for a in sidechain_atoms], dtype=torch.long)       # [K]
+        sc_residue_idx = torch.tensor([a[2] for a in sidechain_atoms], dtype=torch.long)  # [K]
+    else:
+        sc_coords = torch.zeros((0, 3), dtype=torch.float32)
+        sc_atomic = torch.zeros(0, dtype=torch.long)
+        sc_residue_idx = torch.zeros(0, dtype=torch.long)
+
     # Mark ligand atoms within cutoff_for_score of any Cα
     if Y.shape[0] > 0 and ca_coords_list:
         ca_tensor = torch.stack(ca_coords_list)                              # [L_valid, 3]
@@ -237,4 +273,7 @@ def parse_pdb(
         "Y": Y.to(device),
         "Y_t": Y_t.to(device),
         "Y_m": Y_m.to(device),
+        "sidechain_coords":         sc_coords.to(device),
+        "sidechain_atomic_numbers": sc_atomic.to(device),
+        "sidechain_residue_idx":    sc_residue_idx.to(device),
     }

@@ -16,7 +16,14 @@ from torch.utils.data import DataLoader, Dataset
 
 from src import PROJECT_ROOT
 
-from .ligandmpnn_bridge import load_example_from_pdb, load_json_ids, resolve_pdb_path
+from .ligandmpnn_bridge import (
+    _compute_frame_relative_angles,
+    _encode_ligand_elements,
+    _filter_sidechain_by_keep_idx,
+    load_example_from_pdb,
+    load_json_ids,
+    resolve_pdb_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +111,19 @@ def _apply_runtime_crop(item: dict[str, torch.Tensor], max_total_nodes: int) -> 
     # v3 phase 2: frame-relative angles are [L, M, 4] — crop the L axis only.
     if "residue_ligand_frame_angles" in item:
         out["residue_ligand_frame_angles"] = item["residue_ligand_frame_angles"][keep]
+    # v3 phase 5: sidechain atoms — drop atoms whose residue is cropped out
+    # and remap residue indices into the cropped space.
+    if "sidechain_coords" in item:
+        sc_c, sc_a, sc_i = _filter_sidechain_by_keep_idx(
+            item["sidechain_coords"],
+            item["sidechain_atomic_numbers"],
+            item["sidechain_residue_idx"],
+            keep,
+            n_res,
+        )
+        out["sidechain_coords"]         = sc_c
+        out["sidechain_atomic_numbers"] = sc_a
+        out["sidechain_residue_idx"]    = sc_i
     return out
 
 
@@ -112,29 +132,87 @@ def _apply_sidechain_context_aug(
     rate: float,
     rng: random.Random,
 ) -> dict[str, torch.Tensor]:
-    """v3 phase 5 — expose ~`rate` fraction of designable residues' native AA
-    in the AR context. Mutates a shallow copy of `item` to add a
-    ``sidechain_context_mask`` [L] boolean tensor (true = visible to all
-    decoding-order positions). The target sequence and design_mask are
-    unchanged — those residues are still part of the loss.
+    """v3 phase 5 — geometric sidechain context augmentation.
+
+    Direct port of LigandMPNN's ``use_side_chains`` mechanism (model_utils.py
+    1247-1271): a random ``rate`` fraction of designable residues have their
+    sidechain heavy atoms appended to ``ligand_coords`` / ``ligand_atomic_numbers``
+    so the dense PairMixer treats them as ligand-like nodes. The target
+    sequence and design_mask are *unchanged* — these residues are still in
+    the cross-entropy loss; only their geometry leaks into the context.
+
+    Pre-conditions: ``item`` carries the v3 sidechain tensors emitted by the
+    parser when ``return_sidechain_atoms=True`` ('sidechain_coords',
+    'sidechain_atomic_numbers', 'sidechain_residue_idx'). When absent, the
+    aug is a no-op.
+
+    Side effects:
+        * Removes ``sidechain_*`` keys from the returned dict (consumed).
+        * Grows ``ligand_coords`` / ``ligand_mask`` and either
+          ``ligand_atomic_numbers`` (LigandMPNN-style featurizer) or
+          ``ligand_features`` (onehot6 featurizer).
+        * If ``residue_ligand_frame_angles`` and ``residue_backbone_coords``
+          are present, recomputes frame angles over the augmented ligand set
+          so the [L, M, 4] tensor stays aligned with the new M.
     """
     if rate <= 0.0:
+        return item
+    if "sidechain_coords" not in item:
         return item
     L = item["residue_coords"].shape[0]
     if L == 0:
         return item
     out = dict(item)
-    design_mask = out["design_mask"].bool()
-    designable = design_mask.nonzero(as_tuple=False).flatten().tolist()
-    if not designable:
-        out["sidechain_context_mask"] = torch.zeros(L, dtype=torch.bool)
+
+    sc_coords      = out.pop("sidechain_coords")
+    sc_atomic      = out.pop("sidechain_atomic_numbers")
+    sc_residue_idx = out.pop("sidechain_residue_idx")
+
+    designable = out["design_mask"].bool().nonzero(as_tuple=False).flatten().tolist()
+    if not designable or sc_coords.shape[0] == 0:
         return out
+
     n_keep = max(0, int(round(len(designable) * rate)))
+    if n_keep == 0:
+        return out
     chosen = rng.sample(designable, k=min(n_keep, len(designable)))
-    mask = torch.zeros(L, dtype=torch.bool)
-    if chosen:
-        mask[torch.tensor(chosen, dtype=torch.long)] = True
-    out["sidechain_context_mask"] = mask
+    chosen_t = torch.tensor(chosen, dtype=torch.long)
+
+    atom_keep = torch.isin(sc_residue_idx, chosen_t)
+    if not atom_keep.any():
+        return out
+
+    new_coords = sc_coords[atom_keep]
+    new_atomic = sc_atomic[atom_keep]
+
+    out["ligand_coords"] = torch.cat([out["ligand_coords"], new_coords], dim=0)
+    out["ligand_mask"] = torch.cat(
+        [out["ligand_mask"].bool(),
+         torch.ones(new_coords.shape[0], dtype=torch.bool)],
+        dim=0,
+    )
+    if "ligand_atomic_numbers" in out:
+        out["ligand_atomic_numbers"] = torch.cat(
+            [out["ligand_atomic_numbers"].long(), new_atomic.long()], dim=0,
+        )
+    if "ligand_features" in out:
+        # onehot6 path — synthesize the new rows from atomic numbers using
+        # the same encoder the bridge uses for the original ligand atoms.
+        out["ligand_features"] = torch.cat(
+            [out["ligand_features"], _encode_ligand_elements(new_atomic).float()],
+            dim=0,
+        )
+    if (
+        "residue_ligand_frame_angles" in out
+        and "residue_backbone_coords" in out
+    ):
+        # Frame angles depend on the [L, M, 4] product; M just changed, so
+        # the cached angles are stale. Recompute over the augmented ligand
+        # set against the (cached, post-crop) backbone frame.
+        out["residue_ligand_frame_angles"] = _compute_frame_relative_angles(
+            backbone_coords=out["residue_backbone_coords"],
+            ligand_coords=out["ligand_coords"],
+        ).float()
     return out
 
 
@@ -151,6 +229,7 @@ class UMAInverseDataset(Dataset):
         residue_anchor: str = "ca",
         return_backbone_coords: bool = False,
         return_frame_relative_angles: bool = False,
+        return_sidechain_atoms: bool = False,
         sidechain_context_rate: float = 0.0,
         is_training: bool = False,
         aug_seed: int = 0,
@@ -166,6 +245,7 @@ class UMAInverseDataset(Dataset):
         # v3 phase 2/5 — augmentation gates. sidechain_context_rate is applied
         # only when is_training=True so val never sees augmentation.
         self.return_frame_relative_angles = return_frame_relative_angles
+        self.return_sidechain_atoms = bool(return_sidechain_atoms)
         self.sidechain_context_rate = float(sidechain_context_rate)
         self.is_training = bool(is_training)
         self._aug_rng = random.Random(int(aug_seed))
@@ -305,6 +385,16 @@ class UMAInverseDataset(Dataset):
         else:
             out.pop("residue_ligand_frame_angles", None)
 
+        # v3 phase 5: sidechain atoms. Caches predating v3 don't have them;
+        # fall through to the slow path when the current config requests them.
+        if self.return_sidechain_atoms:
+            if "sidechain_coords" not in out:
+                return None
+        else:
+            out.pop("sidechain_coords", None)
+            out.pop("sidechain_atomic_numbers", None)
+            out.pop("sidechain_residue_idx", None)
+
         return out
 
     def __getitem__(self, idx: int, _depth: int = 0) -> dict[str, torch.Tensor]:
@@ -337,6 +427,14 @@ class UMAInverseDataset(Dataset):
                         item = _apply_sidechain_context_aug(
                             item, self.sidechain_context_rate, self._aug_rng,
                         )
+                    # Drop unconsumed sidechain_* keys (val mode, or aug
+                    # short-circuit) so they never reach collate_batch.
+                    for k in (
+                        "sidechain_coords",
+                        "sidechain_atomic_numbers",
+                        "sidechain_residue_idx",
+                    ):
+                        item.pop(k, None)
                     item["pdb_id"] = pdb_id
                     return item
                 # Cache can't satisfy the current flags or has 0 residues —
@@ -364,6 +462,7 @@ class UMAInverseDataset(Dataset):
                 residue_anchor=self.residue_anchor,
                 return_backbone_coords=self.return_backbone_coords,
                 return_frame_relative_angles=self.return_frame_relative_angles,
+                return_sidechain_atoms=self.return_sidechain_atoms,
             )
         except (ValueError, OSError, RuntimeError) as e:
             logger.warning("Failed to featurize %s (%s) — sampling replacement", pdb_id, e)
@@ -374,6 +473,10 @@ class UMAInverseDataset(Dataset):
             item = _apply_sidechain_context_aug(
                 item, self.sidechain_context_rate, self._aug_rng,
             )
+        # Drop unconsumed sidechain_* keys so collate doesn't see them in val
+        # mode or when the aug short-circuited (e.g. no designable residues).
+        for k in ("sidechain_coords", "sidechain_atomic_numbers", "sidechain_residue_idx"):
+            item.pop(k, None)
         item["pdb_id"] = pdb_id
         return item
 
@@ -454,7 +557,6 @@ def collate_batch(batch: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tenso
     uses_embedding = "ligand_atomic_numbers" in batch[0]
     uses_backbone = "residue_backbone_coords" in batch[0]
     uses_frame_angles = "residue_ligand_frame_angles" in batch[0]
-    uses_sidechain_aug = "sidechain_context_mask" in batch[0]
 
     out = {
         "residue_coords":   _pad_2d([b["residue_coords"]   for b in batch], max_res, 3, torch.float32),
@@ -487,11 +589,6 @@ def collate_batch(batch: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tenso
             [b["residue_ligand_frame_angles"] for b in batch],
             max_res, max_lig, 4, torch.float32,
         )
-    if uses_sidechain_aug:
-        out["sidechain_context_mask"] = _pad_1d(
-            [b["sidechain_context_mask"].to(torch.bool) for b in batch],
-            max_res, torch.bool,
-        )
     return out
 
 
@@ -514,6 +611,7 @@ class UMAInverseDataModule(pl.LightningDataModule):
         residue_anchor: str = "ca",
         return_backbone_coords: bool = False,
         return_frame_relative_angles: bool = False,
+        return_sidechain_atoms: bool = False,
         sidechain_context_rate: float = 0.0,
         aug_seed: int = 0,
     ) -> None:
@@ -532,6 +630,7 @@ class UMAInverseDataModule(pl.LightningDataModule):
         self.residue_anchor = residue_anchor
         self.return_backbone_coords = return_backbone_coords
         self.return_frame_relative_angles = return_frame_relative_angles
+        self.return_sidechain_atoms = bool(return_sidechain_atoms)
         self.sidechain_context_rate = float(sidechain_context_rate)
         self.aug_seed = int(aug_seed)
 
@@ -550,6 +649,7 @@ class UMAInverseDataModule(pl.LightningDataModule):
             residue_anchor=self.residue_anchor,
             return_backbone_coords=self.return_backbone_coords,
             return_frame_relative_angles=self.return_frame_relative_angles,
+            return_sidechain_atoms=self.return_sidechain_atoms,
             sidechain_context_rate=self.sidechain_context_rate,
             is_training=is_training,
             aug_seed=self.aug_seed,

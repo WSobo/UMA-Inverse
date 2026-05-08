@@ -39,7 +39,12 @@ def test_collate_batch_padding_shapes():
     assert batch["sequence"].shape == (2, 8)
 
 
-def _v3_sample(L: int, M: int, name: str) -> dict[str, torch.Tensor]:
+def _v3_sample(L: int, M: int, name: str, sc_per_res: int = 4) -> dict[str, torch.Tensor]:
+    """Build a v3-shaped sample. Includes synthetic sidechain heavy atoms
+    (sc_per_res atoms per residue) so the geometric aug can pull them.
+    """
+    K = L * sc_per_res
+    sc_residue_idx = torch.arange(L).repeat_interleave(sc_per_res)
     return {
         "residue_coords": torch.randn(L, 3),
         "residue_features": torch.randn(L, 6),
@@ -51,15 +56,25 @@ def _v3_sample(L: int, M: int, name: str) -> dict[str, torch.Tensor]:
         "ligand_mask": torch.ones(M, dtype=torch.bool),
         "residue_backbone_coords": torch.randn(L, 4, 3),
         "residue_ligand_frame_angles": torch.randn(L, M, 4),
-        "sidechain_context_mask": torch.zeros(L, dtype=torch.bool),
+        "sidechain_coords": torch.randn(K, 3),
+        "sidechain_atomic_numbers": torch.randint(1, 19, (K,)),
+        "sidechain_residue_idx": sc_residue_idx,
         "pdb_id": name,
     }
 
 
 def test_collate_v3_frame_angles_pad_lm():
-    """Frame-angle tensor [L, M, 4] should pad to [B, max_L, max_M, 4]."""
+    """Frame-angle tensor [L, M, 4] should pad to [B, max_L, max_M, 4].
+
+    Sidechain_* keys are consumed by the per-sample aug or dropped before
+    collate, so they must NOT appear in the batched output.
+    """
     a = _v3_sample(L=5, M=3, name="A")
     b = _v3_sample(L=8, M=1, name="B")
+    # Strip sidechain_* the way Dataset.__getitem__ does after aug/drop.
+    for s in (a, b):
+        for k in ("sidechain_coords", "sidechain_atomic_numbers", "sidechain_residue_idx"):
+            s.pop(k, None)
     batch = collate_batch([a, b])
 
     assert batch["residue_ligand_frame_angles"].shape == (2, 8, 3, 4)
@@ -68,63 +83,58 @@ def test_collate_v3_frame_angles_pad_lm():
     assert batch["residue_ligand_frame_angles"][1, :, 1:, :].abs().sum() == 0
     # Sample A has L=5, so rows [5:] should be zero too.
     assert batch["residue_ligand_frame_angles"][0, 5:, :, :].abs().sum() == 0
+    # Sidechain tensors must not be batched — collate has no schema for them.
+    assert "sidechain_coords" not in batch
+    assert "sidechain_residue_idx" not in batch
 
 
-def test_collate_v3_sidechain_mask_pad():
-    """sidechain_context_mask [L] should pad to [B, max_L]."""
-    a = _v3_sample(L=5, M=2, name="A")
-    a["sidechain_context_mask"] = torch.tensor([True, False, True, False, True])
-    b = _v3_sample(L=8, M=2, name="B")
-    batch = collate_batch([a, b])
-
-    assert batch["sidechain_context_mask"].shape == (2, 8)
-    assert batch["sidechain_context_mask"].dtype == torch.bool
-    # First sample's mask preserved, padded slots False.
-    assert batch["sidechain_context_mask"][0, :5].tolist() == [True, False, True, False, True]
-    assert not batch["sidechain_context_mask"][0, 5:].any()
-    # Second sample's mask is all False (default), all-False after pad.
-    assert not batch["sidechain_context_mask"][1].any()
-
-
-def test_apply_sidechain_context_aug_rate_respected():
-    """Augmentation should flag approximately `rate * len(designable)` positions.
-
-    Uses a deterministic RNG so the test is stable.
+def test_apply_sidechain_context_aug_appends_atoms():
+    """v3 phase 5 — augmentation appends sidechain atoms of chosen residues
+    to ligand_coords / ligand_atomic_numbers and recomputes frame angles.
     """
-    L = 100
-    item = _v3_sample(L=L, M=4, name="X")
-    # All residues designable.
+    L, M, sc_per_res = 100, 4, 5
+    item = _v3_sample(L=L, M=M, name="X", sc_per_res=sc_per_res)
     item["design_mask"] = torch.ones(L, dtype=torch.bool)
 
     rng = random.Random(0)
     out = _apply_sidechain_context_aug(item, rate=0.10, rng=rng)
-    n_flagged = int(out["sidechain_context_mask"].sum().item())
-    # round(100 * 0.10) = 10
-    assert n_flagged == 10
-    assert out["design_mask"].equal(item["design_mask"])  # design_mask untouched
+
+    # 10 residues × 5 atoms each = 50 sidechain atoms appended.
+    expected_appended = 10 * sc_per_res
+    assert out["ligand_coords"].shape[0] == M + expected_appended
+    assert out["ligand_atomic_numbers"].shape[0] == M + expected_appended
+    assert out["ligand_mask"].shape[0] == M + expected_appended
+    assert out["ligand_mask"].all()
+    # Frame angles must re-cover the new ligand size in the M dim.
+    assert out["residue_ligand_frame_angles"].shape == (L, M + expected_appended, 4)
+    # Sidechain_* keys are consumed by the aug.
+    assert "sidechain_coords" not in out
+    assert "sidechain_atomic_numbers" not in out
+    assert "sidechain_residue_idx" not in out
 
 
 def test_apply_sidechain_context_aug_zero_rate_noop():
-    """rate=0.0 should leave the item unchanged."""
+    """rate=0.0 must leave ligand tensors untouched."""
     item = _v3_sample(L=8, M=3, name="X")
     rng = random.Random(0)
+    pre_M = item["ligand_coords"].shape[0]
     out = _apply_sidechain_context_aug(item, rate=0.0, rng=rng)
-    # No new key added.
-    assert out is item or out.get("sidechain_context_mask") is None
+    assert out is item
+    assert out["ligand_coords"].shape[0] == pre_M
 
 
 def test_apply_sidechain_context_aug_only_designable():
-    """Sampling should only flag positions where design_mask is True."""
-    L = 20
-    item = _v3_sample(L=L, M=2, name="X")
+    """Sampling must only pull sidechain atoms from designable residues."""
+    L, sc_per_res = 20, 3
+    item = _v3_sample(L=L, M=2, name="X", sc_per_res=sc_per_res)
     # First half designable, second half not.
     dm = torch.zeros(L, dtype=torch.bool)
     dm[:10] = True
     item["design_mask"] = dm
+    pre_M = item["ligand_coords"].shape[0]
 
     rng = random.Random(0)
     out = _apply_sidechain_context_aug(item, rate=1.0, rng=rng)
-    flagged = out["sidechain_context_mask"]
-    # Every flagged index must be in the designable half.
-    assert flagged[:10].all()
-    assert not flagged[10:].any()
+    appended = out["ligand_coords"].shape[0] - pre_M
+    # rate=1.0 + 10 designable + 3 atoms/residue = 30 atoms appended.
+    assert appended == 10 * sc_per_res

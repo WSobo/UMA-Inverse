@@ -78,6 +78,59 @@ class TestLoadExampleBackCompat:
 
 
 @pytest.mark.skipif(not FIXTURE.exists(), reason="test fixture missing")
+class TestSidechainExtraction:
+    """v3 phase 5 — parse_pdb must emit aligned per-residue sidechain heavy
+    atom tensors used by the geometric augmentation in datamodule.
+    """
+
+    def test_keys_present(self) -> None:
+        parsed = parse_pdb(str(FIXTURE))
+        assert "sidechain_coords" in parsed
+        assert "sidechain_atomic_numbers" in parsed
+        assert "sidechain_residue_idx" in parsed
+
+    def test_shape_alignment(self) -> None:
+        parsed = parse_pdb(str(FIXTURE))
+        K = parsed["sidechain_coords"].shape[0]
+        assert parsed["sidechain_atomic_numbers"].shape == (K,)
+        assert parsed["sidechain_residue_idx"].shape == (K,)
+        assert parsed["sidechain_coords"].shape == (K, 3)
+
+    def test_residue_idx_in_range(self) -> None:
+        parsed = parse_pdb(str(FIXTURE))
+        L = parsed["X"].shape[0]
+        if parsed["sidechain_residue_idx"].numel() == 0:
+            pytest.skip("fixture has no sidechain heavy atoms")
+        assert int(parsed["sidechain_residue_idx"].min()) >= 0
+        assert int(parsed["sidechain_residue_idx"].max()) < L
+
+    def test_atoms_present_for_typical_protein(self) -> None:
+        # 1bc8 is a multi-chain protein; expect at least a few hundred sidechain atoms.
+        parsed = parse_pdb(str(FIXTURE))
+        assert parsed["sidechain_coords"].shape[0] > 0
+
+    def test_load_example_with_sidechain_atoms(self) -> None:
+        example = load_example_from_pdb(
+            str(FIXTURE),
+            return_sidechain_atoms=True,
+            max_total_nodes=5000,
+        )
+        assert "sidechain_coords" in example
+        assert "sidechain_atomic_numbers" in example
+        assert "sidechain_residue_idx" in example
+        # residue_idx values must be valid indices into residue_coords post-crop
+        L = example["residue_coords"].shape[0]
+        if example["sidechain_residue_idx"].numel() > 0:
+            assert int(example["sidechain_residue_idx"].max()) < L
+
+    def test_load_example_without_sidechain_atoms_omits_keys(self) -> None:
+        example = load_example_from_pdb(str(FIXTURE), return_sidechain_atoms=False)
+        assert "sidechain_coords" not in example
+        assert "sidechain_atomic_numbers" not in example
+        assert "sidechain_residue_idx" not in example
+
+
+@pytest.mark.skipif(not FIXTURE.exists(), reason="test fixture missing")
 class TestLoadExampleWithResidueIds:
     def test_residue_ids_align_with_coords(self) -> None:
         example = load_example_from_pdb(

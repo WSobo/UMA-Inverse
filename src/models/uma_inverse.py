@@ -584,7 +584,6 @@ class UMAInverse(nn.Module):
         sequence: Tensor | None,
         residue_mask: Tensor,
         decoding_order: Tensor | None = None,
-        sidechain_context_mask: Tensor | None = None,
     ) -> Tensor:
         batch_size, residue_count = residue_mask.shape
         if sequence is None:
@@ -611,14 +610,6 @@ class UMAInverse(nn.Module):
         decoding_order_i = decoding_order.unsqueeze(2)
         decoding_order_j = decoding_order.unsqueeze(1)
         causal = decoding_order_i > decoding_order_j
-
-        # v3 phase 5: sidechain-context augmentation. Positions flagged in
-        # sidechain_context_mask are visible to all i regardless of decoding
-        # order, simulating a downstream user fixing some sidechains at design
-        # time. Train-only (data layer never emits the mask in val).
-        if sidechain_context_mask is not None:
-            visible_j = sidechain_context_mask.unsqueeze(1).bool()  # [B, 1, L]
-            causal = causal | visible_j
 
         valid = causal & residue_mask[:, :, None].bool() & residue_mask[:, None, :].bool()
         valid_h = valid.unsqueeze(1)  # [B, 1, L, L] → broadcasts over heads
@@ -702,7 +693,7 @@ class UMAInverse(nn.Module):
 
         pair_mask = node_mask[:, :, None] & node_mask[:, None, :]
         needs_backbone = (
-            self.pair_distance_atoms == "backbone_full"
+            self.pair_distance_atoms in ("backbone_full", "backbone_full_25")
             or self.pair_distance_atoms_ligand == "backbone_full"
         )
         residue_backbone_coords = residue_backbone_noisy if needs_backbone else None
@@ -737,7 +728,6 @@ class UMAInverse(nn.Module):
             sequence=batch.get("sequence"),
             residue_mask=residue_mask,
             decoding_order=batch.get("decoding_order"),
-            sidechain_context_mask=batch.get("sidechain_context_mask"),
         )
 
         decoder_input = torch.cat(

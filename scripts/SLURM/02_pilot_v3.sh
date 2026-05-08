@@ -27,10 +27,12 @@ srun uv run python -u scripts/pilot_run.py \
     ++data.max_total_nodes=64 \
     ++pilot.epochs=300 \
     ++training.devices=1 \
+    ++data.pair_distance_atoms=backbone_full_25 \
     ++data.pair_distance_atoms_ligand=backbone_full \
+    ++data.ligand_featurizer=ligandmpnn_atomic \
     ++data.frame_relative_angles=true \
+    ++data.return_sidechain_atoms=true \
     ++data.sidechain_context_rate=0.03 \
-    ++model.intra_ligand_multidist=true \
     ++training.coord_noise_std=0.1
 
 echo "v3 pilot done."

@@ -67,6 +67,10 @@ def _process_one(
             # v3 phase 2 — emit frame angles in the union cache so v3 runs
             # don't have to fall through to the slow on-the-fly PDB parse.
             return_frame_relative_angles=True,
+            # v3 phase 5 — sidechain heavy atoms for the geometric augmentation.
+            # Caches built before this change won't have these tensors; the
+            # Dataset slow-path falls through to PDB parse when missing.
+            return_sidechain_atoms=True,
         )
         # Synthesize the v1 onehot6 features from the atomic numbers so the
         # cache can serve either featurizer selection. For zero-ligand

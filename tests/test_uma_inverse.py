@@ -166,7 +166,6 @@ def _v3_batch(B=1, L=12, M=5):
     batch = _make_batch(B=B, L=L, M=M)
     batch["residue_backbone_coords"] = torch.randn(B, L, 4, 3)
     batch["residue_ligand_frame_angles"] = torch.randn(B, L, M, 4)
-    batch["sidechain_context_mask"] = torch.zeros(B, L, dtype=torch.bool)
     batch["ligand_atomic_numbers"] = torch.randint(1, 119, (B, M))
     batch.pop("ligand_features", None)
     return batch
@@ -234,38 +233,39 @@ def test_v3_coord_noise_train_only():
     assert torch.allclose(out_eval_a, out_eval_b)
 
 
-def test_v3_sidechain_context_changes_logits():
-    """Feature 5: flagged positions become bidirectionally visible in AR context.
-
-    Setting sidechain_context_mask should produce different logits than not
-    setting it, because the causal attention now sees more positions.
-    """
-    cfg = _small_config(ligand_featurizer="atomic_number_embedding")
+def test_v3_pair_distance_atoms_backbone_full_25():
+    """LigandMPNN's full 25-pair backbone-pair RBF distance set for L-L."""
+    cfg = _small_config(
+        pair_distance_atoms="backbone_full_25",
+        ligand_featurizer="atomic_number_embedding",
+    )
     model = UMAInverse(cfg)
-    model.eval()
-    batch = _v3_batch(L=10, M=4)
-
-    with torch.no_grad():
-        out_no_aug = model(batch)["logits"]
-
-    # Flag half the positions as visible in AR context.
-    batch["sidechain_context_mask"] = torch.zeros(1, 10, dtype=torch.bool)
-    batch["sidechain_context_mask"][0, ::2] = True
-    with torch.no_grad():
-        out_with_aug = model(batch)["logits"]
-
-    assert not torch.allclose(out_no_aug, out_with_aug, atol=1e-3)
+    out = model(_v3_batch())
+    assert torch.isfinite(out["logits"]).all()
 
 
-def test_v3_all_flags_on_gradient_flow():
-    """All 5 v3 features active simultaneously: forward + backward, no NaN."""
+def test_v3_ligandmpnn_atomic_featurizer():
+    """LigandMPNN-style atomic + group + period one-hot featurizer."""
     cfg = _small_config(
         pair_distance_atoms="backbone_full",
+        ligand_featurizer="ligandmpnn_atomic",
+    )
+    model = UMAInverse(cfg)
+    out = model(_v3_batch())
+    assert torch.isfinite(out["logits"]).all()
+
+
+def test_v3_all_features_on_gradient_flow():
+    """v3 LigandMPNN-faithful feature set on simultaneously: 25-pair backbone,
+    ligand atomic featurizer, backbone-full L-M, frame angles, coord noise.
+    Forward + backward must run without NaN/Inf gradients.
+    """
+    cfg = _small_config(
+        pair_distance_atoms="backbone_full_25",
         pair_distance_atoms_ligand="backbone_full",
         frame_relative_angles=True,
-        intra_ligand_multidist=True,
         coord_noise_std=0.1,
-        ligand_featurizer="atomic_number_embedding",
+        ligand_featurizer="ligandmpnn_atomic",
     )
     model = UMAInverse(cfg)
     model.train()

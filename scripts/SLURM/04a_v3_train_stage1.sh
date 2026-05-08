@@ -35,10 +35,12 @@ uv run python scripts/train.py \
     ++model.gradient_checkpointing=false \
     ++training.warmup_steps=1000 \
     ++training.T_max=280000 \
+    ++data.pair_distance_atoms=backbone_full_25 \
     ++data.pair_distance_atoms_ligand=backbone_full \
+    ++data.ligand_featurizer=ligandmpnn_atomic \
     ++data.frame_relative_angles=true \
+    ++data.return_sidechain_atoms=true \
     ++data.sidechain_context_rate=0.03 \
-    ++model.intra_ligand_multidist=true \
     ++training.coord_noise_std=0.1
 
 echo "v3 Stage 1 complete. last.ckpt at checkpoints/pairmixerinv-v3-stage1-nodes64/"

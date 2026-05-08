@@ -184,6 +184,59 @@ def _construct_virtual_cb(x: torch.Tensor) -> torch.Tensor:
     return -0.58273431 * a + 0.56802827 * b - 0.54067466 * c_vec + ca
 
 
+def _filter_sidechain_by_residue_mask(
+    sc_coords: torch.Tensor,
+    sc_atomic: torch.Tensor,
+    sc_residue_idx: torch.Tensor,
+    keep_mask: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Drop sidechain atoms whose residue is filtered out, remap residue_idx.
+
+    Args:
+        sc_coords:        ``[K, 3]`` sidechain heavy-atom coords.
+        sc_atomic:        ``[K]`` int64 atomic numbers.
+        sc_residue_idx:   ``[K]`` int64 indices into the *current* residue list.
+        keep_mask:        ``[L_current]`` bool — True for residues to retain.
+
+    Returns:
+        Filtered ``(sc_coords, sc_atomic, sc_residue_idx)`` where surviving
+        atoms have their residue indices remapped to the post-filter space
+        (0..keep_mask.sum()-1). Atoms whose residue is dropped are removed.
+    """
+    if sc_coords.shape[0] == 0 or keep_mask.shape[0] == 0:
+        return sc_coords, sc_atomic, sc_residue_idx
+    L_old = keep_mask.shape[0]
+    survivors = keep_mask.nonzero(as_tuple=False).flatten()
+    new_idx = torch.full((L_old,), -1, dtype=torch.long, device=sc_coords.device)
+    new_idx[survivors] = torch.arange(
+        survivors.shape[0], dtype=torch.long, device=sc_coords.device,
+    )
+    in_range = sc_residue_idx < L_old
+    safe_idx = sc_residue_idx.clamp(max=L_old - 1)
+    remapped = torch.where(
+        in_range,
+        new_idx[safe_idx],
+        torch.full_like(sc_residue_idx, -1),
+    )
+    keep_atoms = remapped >= 0
+    return sc_coords[keep_atoms], sc_atomic[keep_atoms], remapped[keep_atoms]
+
+
+def _filter_sidechain_by_keep_idx(
+    sc_coords: torch.Tensor,
+    sc_atomic: torch.Tensor,
+    sc_residue_idx: torch.Tensor,
+    keep_idx: torch.Tensor,
+    L_current: int,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Filter+remap sidechain atoms by an int index tensor (e.g. crop output)."""
+    if sc_coords.shape[0] == 0 or L_current == 0:
+        return sc_coords, sc_atomic, sc_residue_idx
+    keep_mask = torch.zeros(L_current, dtype=torch.bool, device=sc_coords.device)
+    keep_mask[keep_idx] = True
+    return _filter_sidechain_by_residue_mask(sc_coords, sc_atomic, sc_residue_idx, keep_mask)
+
+
 def _select_residue_crop(
     residue_coords: torch.Tensor,
     ligand_coords: torch.Tensor,
@@ -230,6 +283,7 @@ def load_example_from_pdb(
     residue_anchor: str = "ca",
     return_backbone_coords: bool = False,
     return_frame_relative_angles: bool = False,
+    return_sidechain_atoms: bool = False,
 ) -> dict[str, object]:
     """Featurize a single PDB file into model-ready tensors.
 
@@ -273,6 +327,12 @@ def load_example_from_pdb(
             multi-atom backbone distances in its pair tensor (v2 phase 3).
             False by default to avoid the extra per-sample memory when the
             model is configured for anchor-only pair distances.
+        return_sidechain_atoms: When True, emit per-residue sidechain heavy
+            atoms (``sidechain_coords [K,3]``, ``sidechain_atomic_numbers [K]``,
+            ``sidechain_residue_idx [K]`` with values in 0..L-1). Required
+            for the v3 sidechain-context augmentation, which appends a random
+            fraction of these atoms to ``ligand_coords`` at training time so
+            the dense PairMixer can treat them as ligand-like nodes.
 
     Returns:
         Dict with keys:
@@ -288,6 +348,10 @@ def load_example_from_pdb(
         * ``ligand_atomic_numbers``    ``[M]``          int64 atomic numbers (embedding only)
         * ``ligand_mask``              ``[M]``         all-True (valid ligand atoms only)
         * ``residue_anchor_atom``      ``str``          ``"ca"`` or ``"cb"`` (traceability)
+        * ``sidechain_coords``         ``[K, 3]``       per-residue sidechain heavy
+          atoms (when ``return_sidechain_atoms=True``)
+        * ``sidechain_atomic_numbers`` ``[K]``           int64 atomic numbers
+        * ``sidechain_residue_idx``    ``[K]``           int64 residue indices in 0..L-1
         * ``residue_ids``              ``List[str]`` (when ``return_residue_ids=True``)
     """
     if ligand_featurizer not in ("onehot6", "atomic_number_embedding"):
@@ -338,6 +402,16 @@ def load_example_from_pdb(
     residue_features = _compute_backbone_dihedrals(x)[residue_mask]  # [L_valid, 6]
     sequence         = parsed["S"][residue_mask].long()        # [L_valid]
     design_mask      = chain_mask[residue_mask].bool()         # [L_valid]
+
+    # Sidechain heavy atoms — filter atoms whose residue is masked out and
+    # remap residue indices into the [L_valid] space. Computed unconditionally
+    # so the variables are defined; only emitted when return_sidechain_atoms.
+    sc_coords_in        = parsed["sidechain_coords"]
+    sc_atomic_in        = parsed["sidechain_atomic_numbers"]
+    sc_residue_idx_in   = parsed["sidechain_residue_idx"]
+    sc_coords, sc_atomic, sc_residue_idx = _filter_sidechain_by_residue_mask(
+        sc_coords_in, sc_atomic_in, sc_residue_idx_in, residue_mask,
+    )
     # backbone tensor is needed by either the v2 multi-atom pair path
     # (return_backbone_coords) or the v3 frame-angle path. Compute once.
     needs_backbone_internal = return_backbone_coords or return_frame_relative_angles
@@ -398,12 +472,16 @@ def load_example_from_pdb(
             max_total_nodes,
         )
 
+    L_pre_crop = residue_coords.shape[0]
     residue_coords   = residue_coords[keep_idx]
     residue_features = residue_features[keep_idx]
     sequence         = sequence[keep_idx]
     design_mask      = design_mask[keep_idx]
     if residue_backbone_coords is not None:
         residue_backbone_coords = residue_backbone_coords[keep_idx]
+    sc_coords, sc_atomic, sc_residue_idx = _filter_sidechain_by_keep_idx(
+        sc_coords, sc_atomic, sc_residue_idx, keep_idx, L_pre_crop,
+    )
 
     residue_ligand_frame_angles: torch.Tensor | None = None
     if return_frame_relative_angles:
@@ -439,6 +517,10 @@ def load_example_from_pdb(
         output["residue_backbone_coords"] = residue_backbone_coords.float()
     if residue_ligand_frame_angles is not None:
         output["residue_ligand_frame_angles"] = residue_ligand_frame_angles.float()
+    if return_sidechain_atoms:
+        output["sidechain_coords"]         = sc_coords.float()
+        output["sidechain_atomic_numbers"] = sc_atomic.long()
+        output["sidechain_residue_idx"]    = sc_residue_idx.long()
     if residue_ids_valid is not None:
         output["residue_ids"] = residue_ids_valid
     return output
