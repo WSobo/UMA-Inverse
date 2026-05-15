@@ -25,6 +25,7 @@ cd /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse
 
 # ── Defaults — override via sbatch --export ──────────────────────────────────
 BENCH_CKPT="${BENCH_CKPT:-checkpoints/last.ckpt}"
+BENCH_CONFIG="${BENCH_CONFIG:-configs/config.yaml}"
 BENCH_VAL_JSON="${BENCH_VAL_JSON:-LigandMPNN/training/valid.json}"
 BENCH_PDB_DIR="${BENCH_PDB_DIR:-data/raw/pdb_archive}"
 BENCH_OUT_DIR="${BENCH_OUT_DIR:-outputs/benchmark}"
@@ -33,6 +34,7 @@ BENCH_N="${BENCH_N:-500}"
 
 echo ">> benchmark config:"
 echo "     ckpt       = $BENCH_CKPT"
+echo "     config     = $BENCH_CONFIG"
 echo "     val json   = $BENCH_VAL_JSON"
 echo "     pdb dir    = $BENCH_PDB_DIR"
 echo "     out dir    = $BENCH_OUT_DIR"
@@ -46,8 +48,11 @@ else
     N_FLAG="--n-pdbs $BENCH_N"
 fi
 
+# For v3 ckpts, pass BENCH_CONFIG=configs/config_v3.yaml so the model
+# architecture and ligand featurizer match the ckpt's training-time flags.
 uv run uma-inverse benchmark \
     --ckpt "$BENCH_CKPT" \
+    --config "$BENCH_CONFIG" \
     --val-json "$BENCH_VAL_JSON" \
     --pdb-dir "$BENCH_PDB_DIR" \
     --out-dir "$BENCH_OUT_DIR" \

@@ -20,8 +20,7 @@ set -e
 cd /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse
 
 echo ">> UMA pocket-fixed designs"
-echo ">>   ckpt: checkpoints/pairmixerinv-v2-stage3-nodes384-ddp8/uma-inverse-19-1.1463.ckpt"
-echo ">>   selection: outputs/preprint/pdb_selection.json"
+echo ">>   args: $*"
 
 uv run python scripts/paper/run_pocket_fixed_designs.py "$@"
 

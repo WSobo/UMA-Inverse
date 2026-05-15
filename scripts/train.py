@@ -18,6 +18,7 @@ import pytorch_lightning as pl
 import torch
 from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning.callbacks import (
+    Callback,
     EarlyStopping,
     LearningRateMonitor,
     ModelCheckpoint,
@@ -25,6 +26,26 @@ from pytorch_lightning.callbacks import (
     RichProgressBar,
 )
 from pytorch_lightning.loggers import CSVLogger
+
+
+class SaveLastEveryEpoch(Callback):
+    """Refresh ``last.ckpt`` after every validation epoch.
+
+    Lightning's built-in ``save_last=True`` only refreshes ``last.ckpt`` on
+    top-K save events. When val/loss plateaus and a new epoch doesn't make
+    the top-K, ``last.ckpt`` goes stale — which silently broke stage-to-stage
+    init for v3 (stage 2's last.ckpt was frozen on ep 9 while training ran
+    through ep 17, so stage 3 init'd from a suboptimal checkpoint).
+    """
+
+    def __init__(self, last_path: str):
+        super().__init__()
+        self.last_path = last_path
+
+    def on_validation_epoch_end(self, trainer, pl_module):
+        if not trainer.is_global_zero or trainer.sanity_checking:
+            return
+        trainer.save_checkpoint(self.last_path)
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
@@ -159,12 +180,11 @@ def main(cfg: DictConfig) -> None:
         monitor="val/loss",
         mode="min",
         save_top_k=3,
-        save_last=True,
+        save_last=False,
     )
-    # Second callback retains every epoch snapshot unconditionally. The primary
-    # save_top_k=3 callback only updates `last.ckpt` when a new top-k save
-    # happens, so if val plateaus (as in stage 2) intermediate weights are
-    # lost. epoch_snapshot_cb guarantees we can always go back to any epoch.
+    # Always retain every epoch snapshot unconditionally, separate from the
+    # val/loss-tied top-K callback above. Useful when val plateaus and we want
+    # to roll back to a specific epoch.
     epoch_snapshot_cb = ModelCheckpoint(
         dirpath=f"checkpoints/{run_name}/epoch_snapshots",
         filename="epoch-{epoch:02d}",
@@ -173,9 +193,16 @@ def main(cfg: DictConfig) -> None:
         save_top_k=-1,
         save_on_train_epoch_end=True,
     )
+    # Explicit `last.ckpt` callback decoupled from top-K — refreshes every
+    # validation epoch regardless of whether the current epoch is in the
+    # top-K. Stage transitions reference this file, so it MUST stay current.
+    save_last_cb = SaveLastEveryEpoch(
+        last_path=f"checkpoints/{run_name}/last.ckpt",
+    )
     callbacks = [
         checkpoint_cb,
         epoch_snapshot_cb,
+        save_last_cb,
         LearningRateMonitor(logging_interval="step"),
         # check_finite=False: tolerate transient NaN val/loss epochs without
         # killing training. Lightning's default check_finite=True ended a v2

@@ -117,12 +117,24 @@ class InferenceSession:
         self.config = config
         self.device = device
         self.checkpoint_path = checkpoint_path
-        # v2 phase 1/2/3: data layer is the authoritative source; the model
+        # v2/v3: data layer is the authoritative source; the model
         # reads the same values via OmegaConf interpolation.
         data_section = config.data if "data" in config else {}
         self.ligand_featurizer = str(data_section.get("ligand_featurizer", "onehot6"))
         self.residue_anchor = str(data_section.get("residue_anchor", "ca"))
         self.pair_distance_atoms = str(data_section.get("pair_distance_atoms", "anchor_only"))
+        self.pair_distance_atoms_ligand = str(
+            data_section.get("pair_distance_atoms_ligand", "anchor_only")
+        )
+        self.frame_relative_angles = bool(data_section.get("frame_relative_angles", False))
+        # Backbone coords are needed for any backbone_full* setting (v2 + v3),
+        # for the v3 L-M backbone-pair distances, and to compute v3 frame
+        # angles. Centralised so load_structure / _init_pair stay in sync.
+        self._needs_backbone_coords = (
+            self.pair_distance_atoms.startswith("backbone_full")
+            or self.pair_distance_atoms_ligand.startswith("backbone_full")
+            or self.frame_relative_angles
+        )
 
     # ── Factory ───────────────────────────────────────────────────────────────
 
@@ -231,7 +243,8 @@ class InferenceSession:
             return_residue_ids=True,
             ligand_featurizer=self.ligand_featurizer,
             residue_anchor=self.residue_anchor,
-            return_backbone_coords=(self.pair_distance_atoms == "backbone_full"),
+            return_backbone_coords=self._needs_backbone_coords,
+            return_frame_relative_angles=self.frame_relative_angles,
         )
 
         residue_ids: list[str] = example["residue_ids"]  # type: ignore[assignment]
@@ -265,19 +278,29 @@ class InferenceSession:
         native_sequence = example["sequence"].to(device).long()
         design_mask = example["design_mask"].bool().to(device)
         residue_backbone_coords: torch.Tensor | None = None
-        if self.pair_distance_atoms == "backbone_full":
+        if self._needs_backbone_coords:
             residue_backbone_coords = (
                 example["residue_backbone_coords"].to(device).unsqueeze(0)
             )
+        residue_ligand_frame_angles: torch.Tensor | None = None
+        if self.frame_relative_angles and "residue_ligand_frame_angles" in example:
+            residue_ligand_frame_angles = (
+                example["residue_ligand_frame_angles"].to(device).unsqueeze(0)
+            )
 
-        # Featurizer-specific ligand tensor. For mask_ligand: the onehot path
-        # zeroes the feature vector directly; the embedding path maps every
-        # slot to padding_idx=0, producing the same zero-vector effect.
+        # Featurizer-specific ligand tensor. For mask_ligand:
+        #   onehot6                  → zero the [M, 6] feature vector
+        #   atomic_number_embedding  → zero atomic numbers; nn.Embedding maps
+        #                              index 0 to padding_idx → zero vector
+        #   ligandmpnn_atomic        → zero atomic numbers; the LigandMPNN
+        #                              featurizer's group/period one-hots fire
+        #                              at slot 0 ("no group", "no period"),
+        #                              which is the trained "no atom" row
         if self.ligand_featurizer == "onehot6":
             ligand_features = example["ligand_features"].to(device).unsqueeze(0)
             if mask_ligand:
                 ligand_features = torch.zeros_like(ligand_features)
-        else:  # "atomic_number_embedding"
+        else:  # "atomic_number_embedding" or "ligandmpnn_atomic"
             ligand_atomic_numbers = example["ligand_atomic_numbers"].to(device).unsqueeze(0)
             if mask_ligand:
                 ligand_atomic_numbers = torch.zeros_like(ligand_atomic_numbers)
@@ -291,7 +314,7 @@ class InferenceSession:
         residue_repr = model.residue_in(residue_features)
         if self.ligand_featurizer == "onehot6":
             ligand_repr = model.ligand_in(ligand_features)
-        else:  # "atomic_number_embedding"
+        else:  # "atomic_number_embedding" or "ligandmpnn_atomic"
             ligand_repr = model.ligand_in(ligand_atomic_numbers)
         node_repr = model.node_norm(torch.cat([residue_repr, ligand_repr], dim=1))
         coords_all = torch.cat([residue_coords, ligand_coords], dim=1)
@@ -304,6 +327,7 @@ class InferenceSession:
             pair_mask=pair_mask,
             residue_count=residue_count,
             residue_backbone_coords=residue_backbone_coords,
+            residue_ligand_frame_angles=residue_ligand_frame_angles,
         )
         z = model.encoder(z, pair_mask.to(dtype=z.dtype))
 

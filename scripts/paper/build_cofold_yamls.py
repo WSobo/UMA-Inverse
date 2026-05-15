@@ -167,11 +167,29 @@ def main() -> None:
         type=Path,
         default=PROJECT_ROOT / "data" / "raw" / "pdb_archive" / "test_small_molecule",
     )
+    parser.add_argument(
+        "--uma-method-name",
+        type=str,
+        default="uma_v2",
+        help=(
+            "Method label for the UMA-Inverse outputs (used as the YAML "
+            "subdirectory name and the 'method' field in sampling_record.json). "
+            "Set to 'uma_v3' when building cofold inputs from v3 designs."
+        ),
+    )
+    parser.add_argument(
+        "--skip-ligandmpnn",
+        action="store_true",
+        help="Skip emitting LigandMPNN YAMLs (e.g., when re-using a prior cofold).",
+    )
     args = parser.parse_args()
 
+    UMA_METHOD = args.uma_method_name
+
     args.out_dir.mkdir(parents=True, exist_ok=True)
-    (args.out_dir / "uma_v2").mkdir(exist_ok=True)
-    (args.out_dir / "ligandmpnn").mkdir(exist_ok=True)
+    (args.out_dir / UMA_METHOD).mkdir(exist_ok=True)
+    if not args.skip_ligandmpnn:
+        (args.out_dir / "ligandmpnn").mkdir(exist_ok=True)
 
     rng = random.Random(args.seed)
     selection = json.loads(args.selection.read_text())
@@ -182,8 +200,8 @@ def main() -> None:
     for entry in selection["metal"]:
         pdbs.append((entry["pdb_id"], "metal", entry))
 
-    n_emitted = {"uma_v2": 0, "ligandmpnn": 0}
-    n_missing = {"uma_v2": 0, "ligandmpnn": 0}
+    n_emitted = {UMA_METHOD: 0, "ligandmpnn": 0}
+    n_missing = {UMA_METHOD: 0, "ligandmpnn": 0}
 
     sampling_record: list[dict] = []  # remember which sample indices we picked
 
@@ -247,19 +265,23 @@ def main() -> None:
                     "sample_idx": s_idx, "yaml": str(out_path),
                 })
 
-        _emit("uma_v2", _load_uma_designs(pdb_id, args.uma_dir))
-        _emit("ligandmpnn", _load_ligandmpnn_designs(pdb_id, args.ligandmpnn_dir))
+        _emit(UMA_METHOD, _load_uma_designs(pdb_id, args.uma_dir))
+        if not args.skip_ligandmpnn:
+            _emit("ligandmpnn", _load_ligandmpnn_designs(pdb_id, args.ligandmpnn_dir))
 
     # Persist the sampling record for downstream metric computation
     record_path = args.out_dir / "sampling_record.json"
     record_path.write_text(json.dumps(sampling_record, indent=2))
     logger.info("wrote %s   (%d entries)", record_path, len(sampling_record))
 
-    print(f"\nUMA YAMLs:        {n_emitted['uma_v2']:>3d}   (missing for {n_missing['uma_v2']} PDBs)")
-    print(f"LigandMPNN YAMLs: {n_emitted['ligandmpnn']:>3d}   (missing for {n_missing['ligandmpnn']} PDBs)")
+    print(f"\nUMA YAMLs ({UMA_METHOD}): {n_emitted[UMA_METHOD]:>3d}   "
+          f"(missing for {n_missing[UMA_METHOD]} PDBs)")
+    if not args.skip_ligandmpnn:
+        print(f"LigandMPNN YAMLs:        {n_emitted['ligandmpnn']:>3d}   "
+              f"(missing for {n_missing['ligandmpnn']} PDBs)")
     print(f"Total cofolds to run: {sum(n_emitted.values())}")
     print("\nLaunch cofolds with:")
-    print("  sbatch scripts/SLURM/preprint_boltz_cofold.sh")
+    print("  sbatch scripts/SLURM/preprint_boltz_cofold.sh   (or _v3)")
 
 
 if __name__ == "__main__":

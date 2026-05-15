@@ -204,6 +204,13 @@ def write_report(
         out_dir / "calibration.csv", index=False
     )
 
+    # ── Length-stratified recovery (defensive table for the >359-residue
+    # cropping concern; the perplexity-by-length figure shows the trend, this
+    # CSV gives the per-bin numbers reviewers want to cite).
+    pd.DataFrame(_length_stratified_rows(pdb_df, pos_df)).to_csv(
+        out_dir / "length_stratified.csv", index=False
+    )
+
     # ── AA composition
     comp_df = pd.DataFrame(
         {
@@ -272,6 +279,72 @@ def write_report(
         temperature=temperature_rows,
         run_metadata=run_metadata,
     )
+
+
+_LENGTH_BINS: list[tuple[str, int, int]] = [
+    ("≤100", 0, 100),
+    ("101-200", 101, 200),
+    ("201-300", 201, 300),
+    ("301-400", 301, 400),
+    ("401-500", 401, 500),
+    (">500", 501, 10**9),
+]
+
+
+def _length_stratified_rows(
+    pdb_df: pd.DataFrame, pos_df: pd.DataFrame
+) -> list[dict]:
+    """Per-length-bin recovery + perplexity rows for `length_stratified.csv`.
+
+    Recovery is residue-pooled inside each bin (pos_df rows where the PDB falls
+    in the bin). Perplexity is the mean per-PDB perplexity inside the bin. Both
+    are reported alongside the PDB and residue counts so reviewers can see
+    sample sizes per bin.
+    """
+    if pdb_df.empty:
+        return []
+
+    rows: list[dict] = []
+    pdb_to_len = pdb_df.set_index("pdb_id")["num_residues"]
+    pos_with_len = pos_df.assign(num_residues=pos_df["pdb_id"].map(pdb_to_len))
+
+    for label, lo, hi in _LENGTH_BINS:
+        in_bin_pdb = pdb_df[(pdb_df["num_residues"] >= lo) & (pdb_df["num_residues"] <= hi)]
+        in_bin_pos = pos_with_len[
+            (pos_with_len["num_residues"] >= lo) & (pos_with_len["num_residues"] <= hi)
+        ]
+        n_pdbs = int(len(in_bin_pdb))
+        n_residues = int(len(in_bin_pos))
+        if n_residues == 0:
+            rows.append(
+                {
+                    "length_bin": label,
+                    "lo": lo,
+                    "hi": hi if hi < 10**9 else None,
+                    "n_pdbs": n_pdbs,
+                    "n_residues": 0,
+                    "pooled_recovery": float("nan"),
+                    "mean_pdb_recovery": float("nan"),
+                    "mean_perplexity": float("nan"),
+                }
+            )
+            continue
+        pooled_rec = float((in_bin_pos["pred_token"] == in_bin_pos["native_token"]).mean())
+        mean_pdb_rec = float(in_bin_pdb["recovery"].mean())
+        mean_ppl = float(in_bin_pdb["perplexity"].mean())
+        rows.append(
+            {
+                "length_bin": label,
+                "lo": lo,
+                "hi": hi if hi < 10**9 else None,
+                "n_pdbs": n_pdbs,
+                "n_residues": n_residues,
+                "pooled_recovery": pooled_rec,
+                "mean_pdb_recovery": mean_pdb_rec,
+                "mean_perplexity": mean_ppl,
+            }
+        )
+    return rows
 
 
 def _write_summary_json(

@@ -41,4 +41,20 @@ srun uv run python scripts/train.py \
     ++data.sidechain_context_rate=0.03 \
     ++training.coord_noise_std=0.1
 
+# Promote the lowest-val-loss top-K snapshot to checkpoints/uma-inverse-v3.ckpt
+# so downstream scripts (benchmark, pocket-fixed redesign, distal KL) pick it
+# up by default. Mirrors the v2 naming convention.
+CKPT_DIR=checkpoints/pairmixerinv-v3-stage3-nodes384-ddp8
+BEST_NAME=$(ls "${CKPT_DIR}"/uma-inverse-*-*.ckpt 2>/dev/null \
+    | xargs -n1 basename \
+    | sort -t- -k4 -n \
+    | head -1)
+[[ -n "$BEST_NAME" ]] && BEST="${CKPT_DIR}/${BEST_NAME}" || BEST=""
+if [[ -n "$BEST" ]]; then
+    cp "$BEST" checkpoints/uma-inverse-v3.ckpt
+    echo "v3 final: $BEST -> checkpoints/uma-inverse-v3.ckpt"
+else
+    echo "WARNING: no top-K snapshot found in $CKPT_DIR; downstream scripts will need --ckpt set explicitly"
+fi
+
 echo "v3 Stage 3 DDP complete."

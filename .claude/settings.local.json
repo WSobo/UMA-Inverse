@@ -24,7 +24,16 @@
       "WebSearch",
       "Bash(xargs ls -lh)",
       "Bash(git status *)",
-      "Bash(sbatch *)"
+      "Bash(sbatch *)",
+      "Bash(pandoc --version)",
+      "Bash(make clean *)",
+      "Bash(rtk find *)",
+      "Bash([[ -f \"$CSV\" ]])",
+      "Bash(awk -F, 'NR>1 && $10!=\"\" {printf \"  ep%s val/acc=%.4f val/loss=%.4f\\\\n\", $1, $10, $11}' logs/csv/pairmixerinv-v3-stage3-nodes384-ddp8/version_0/metrics.csv)",
+      "Bash(awk -F, 'NR>1 && $4!=\"\" {printf \"  ep%s train/acc=%.4f train/loss=%.4f\\\\n\", $1, $4, $7}' logs/csv/pairmixerinv-v3-stage3-nodes384-ddp8/version_0/metrics.csv)",
+      "Bash(awk '{print $NF, $6, $7, $8}')",
+      "Bash(bash -n scripts/SLURM/submit_post_v3_pipeline.sh)",
+      "Bash(bash scripts/SLURM/submit_post_v3_pipeline.sh --after 99999999 --dry-run)"
     ]
   }
 }
