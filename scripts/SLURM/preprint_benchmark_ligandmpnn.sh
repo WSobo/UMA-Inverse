@@ -46,56 +46,107 @@ if [[ ! -f "${CHECKPOINT_PATH}" ]]; then
     exit 1
 fi
 
-# ── Build pdb_path_multi.json from val.json (resolve actual PDB paths) ────────
-echo ">> Resolving ${N_PDBS} PDB paths from val.json"
+# ── Activate ligandmpnn_env (needed for ProDy pre-validation and LigandMPNN) ──
+eval "$(micromamba shell hook --shell bash)"
+micromamba activate ligandmpnn_env
+
+# ── Resolve + pre-validate PDB paths using ProDy (same env as LigandMPNN) ────
+# Running validation under ligandmpnn_env catches every ProDy failure mode:
+# DNA/RNA-only structures, shape mismatches, non-standard files, etc.
+echo ">> Resolving and ProDy-validating ${N_PDBS} PDB paths from val.json"
 cd "${PROJ}"
-uv run python - <<'PYEOF'
-import json, os, sys
+python - <<PYEOF
+import json, sys
 from pathlib import Path
 
-proj = Path(os.environ["PROJ"])
+proj    = Path("${PROJ}")
 val_ids = json.loads((proj / "LigandMPNN/training/valid.json").read_text())
 pdb_dir = proj / "data/raw/pdb_archive"
-n_pdbs  = int(os.environ.get("N_PDBS", 2000))
+n_pdbs  = int("${N_PDBS}")
 
 def resolve(pdb_id):
     pid = pdb_id.lower()
     for p in [pdb_dir / pid[1:3] / f"{pid}.pdb", pdb_dir / f"{pid}.pdb"]:
         if p.exists():
-            return str(p)
+            return p
     return None
 
+from prody import parsePDB, confProDy
+confProDy(verbosity="none")
+
+def prody_ok(path):
+    try:
+        atoms = parsePDB(str(path))
+        return atoms is not None and atoms.select("protein and backbone") is not None
+    except Exception:
+        return False
+
 pdb_map = {}
-for pdb_id in val_ids[:n_pdbs]:
-    path = resolve(pdb_id)
-    if path:
-        pdb_map[path] = ""
+n_missing = 0
+n_invalid = 0
+for pdb_id in val_ids:
     if len(pdb_map) >= n_pdbs:
         break
+    path = resolve(pdb_id)
+    if path is None:
+        n_missing += 1
+        continue
+    if prody_ok(path):
+        pdb_map[str(path)] = ""
+    else:
+        n_invalid += 1
+        print(f"  skip (ProDy): {pdb_id}", file=sys.stderr)
 
+# Write one chunk JSON per 100 PDBs so a single bad PDB only kills its chunk
+paths = list(pdb_map.keys())
+chunk_size = 100
+chunks_dir = proj / "outputs/benchmark" / f"ligandmpnn-val{n_pdbs}" / "inputs" / "chunks"
+chunks_dir.mkdir(parents=True, exist_ok=True)
+chunk_files = []
+for i in range(0, len(paths), chunk_size):
+    chunk = {p: "" for p in paths[i:i+chunk_size]}
+    cf = chunks_dir / f"chunk_{i//chunk_size:03d}.json"
+    cf.write_text(json.dumps(chunk, indent=2))
+    chunk_files.append(str(cf))
+
+# Write the full map too (for reference)
 out = proj / "outputs/benchmark" / f"ligandmpnn-val{n_pdbs}" / "inputs" / "pdb_path_multi.json"
 out.write_text(json.dumps(pdb_map, indent=2))
-print(f"resolved {len(pdb_map)} / {n_pdbs} PDB paths -> {out}")
+# Write chunk list for bash loop
+(chunks_dir / "chunk_list.txt").write_text("\n".join(chunk_files) + "\n")
+print(f"resolved {len(pdb_map)} PDBs (missing={n_missing}, prody_invalid={n_invalid})")
+print(f"split into {len(chunk_files)} chunks of {chunk_size} -> {chunks_dir}")
 PYEOF
 
 N_RESOLVED=$(python3 -c "import json; d=json.load(open('${INPUTS_DIR}/pdb_path_multi.json')); print(len(d))")
-echo ">> Running LigandMPNN on ${N_RESOLVED} PDBs (T=0.1, 1 sample, save_stats)"
-
-eval "$(micromamba shell hook --shell bash)"
-micromamba activate ligandmpnn_env
+N_CHUNKS=$(wc -l < "${INPUTS_DIR}/chunks/chunk_list.txt")
+echo ">> Running LigandMPNN on ${N_RESOLVED} PDBs in ${N_CHUNKS} chunks (T=0.1, 1 sample, save_stats)"
 
 cd "${LIGANDMPNN_DIR}"
 
-python run.py \
-    --model_type ligand_mpnn \
-    --checkpoint_ligand_mpnn "${CHECKPOINT_PATH}" \
-    --pdb_path_multi "${INPUTS_DIR}/pdb_path_multi.json" \
-    --out_folder "${OUT_DIR}" \
-    --batch_size 1 \
-    --number_of_batches 1 \
-    --temperature 0.1 \
-    --seed 0 \
-    --save_stats 1
+n_ok=0
+n_fail=0
+while IFS= read -r chunk_json; do
+    chunk_name=$(basename "${chunk_json}" .json)
+    echo "   chunk ${chunk_name} ..."
+    if python run.py \
+        --model_type ligand_mpnn \
+        --checkpoint_ligand_mpnn "${CHECKPOINT_PATH}" \
+        --pdb_path_multi "${chunk_json}" \
+        --out_folder "${OUT_DIR}" \
+        --batch_size 1 \
+        --number_of_batches 1 \
+        --temperature 0.1 \
+        --seed 0 \
+        --save_stats 1 2>/dev/null; then
+        n_ok=$((n_ok + 1))
+    else
+        echo "   !! chunk ${chunk_name} failed -- skipping"
+        n_fail=$((n_fail + 1))
+    fi
+done < "${INPUTS_DIR}/chunks/chunk_list.txt"
+
+echo ">> LigandMPNN done: ${n_ok} chunks OK, ${n_fail} chunks failed"
 
 echo ">> LigandMPNN inference done. Post-processing stats..."
 
