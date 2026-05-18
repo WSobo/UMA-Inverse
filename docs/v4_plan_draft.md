@@ -90,14 +90,24 @@ per PDB on a ~400-PDB val sample, train a single
 | 0.60–0.85 | encoder partial | v4 wins from feature density (AF3 pos enc, AtomFlow, token_bonds) |
 | < 0.60 | encoder weak    | Z_ij not carrying geometry → trunk rethink before features |
 
-### 2.4 OPEN — to fill once probe runs
-- [ ] Top-1: ___  Top-3: ___  Neighbor (±1): ___  MAE: ___ Å  ECE: ___
-- [ ] Per-bin recall histogram inspection (is the probe just predicting the
-  modal bin? Look at low-recall bins for clues to what geometry is missing.)
-- [ ] Verdict: ___
-- [ ] If `encoder_partial`: which bin range fails worst? (Long-range >15 Å
-  is harder; expected to be lower regardless. If short-range <5 Å also
-  fails, the encoder has structural issues.)
+### 2.4 FILLED — distogram probe results (2026-05-15)
+
+- **Top-1: 0.266**  Top-3: 0.588  Neighbor (±1): 0.568  MAE: 3.69 Å  ECE: 0.025
+- **VERDICT: encoder_weak** (top-1 = 0.266, far below 0.60 threshold)
+
+Interpretation:
+- top-3 (0.588) >> top-1 (0.266): the probe learns coarse distance ranges
+  but cannot discriminate precisely. ECE=0.025 means it is well-calibrated,
+  so this is not overconfidence — the encoder simply does not carry
+  fine-grained Cβ-Cβ geometry in Z_ij.
+- Combined with distal-KL outcome (UMA diverges 20× more from native than
+  LigandMPNN at >25 Å), the picture is: the encoder IS responding to the
+  ligand at distal positions (mechanism KL higher), but the responses are
+  noisy/incorrect because Z_ij lacks geometric grounding.
+- v4 implication (pre-committed): trunk rethink before features. Adding
+  AF3 pos-enc or AtomFlow features to a geometrically-blind trunk will
+  not fix this — the trunk needs a geometry supervision signal during
+  training (→ promote Stage 2 auxiliary heads to the front of v4).
 
 ---
 
@@ -122,13 +132,28 @@ make v4 decisions tractable.
   decides whether the loss is encoder (→ trunk rethink) or decoder
   (→ data + decoder upgrade).
 
-### 3.1 OPEN — to fill once cofold queue completes
-- [ ] v3 cofold pass-rate vs LigandMPNN: ___ / ___
-- [ ] v3 pocket Cα RMSD (best / mean / stdev): ___ / ___ / ___
-- [ ] v3 ligand RMSD (best / mean / stdev): ___ / ___ / ___
-- [ ] v3 pocket residue recovery vs LigandMPNN: ___ / ___
-- [ ] v3 mean distal KL (>15 Å) vs LigandMPNN: ___ / ___
-- [ ] **Yardstick committed to:** A / B / (defer)
+### 3.1 FILLED — cofold + distal-KL results (2026-05-15)
+
+**Important:** UMA ran on 35 PDBs; LigandMPNN ran on 20. Aggregate comparison
+is misleading. All headline numbers below are on the **20 shared PDBs** (apples-to-apples).
+
+- **v3 cofold pass-rate (design-level) vs LigandMPNN: 65.0% / 66.0%** — essentially tied
+- **v3 cofold pass-rate (PDB-level, any design passes): 80.0% vs 75.0%** — UMA wins by 5 pts
+- v3 pocket Cα RMSD (median/mean): **1.34 / 2.94 Å** vs LigandMPNN 1.30 / 2.92 Å — tied
+- v3 ligand RMSD (median/mean): **0.81 / 1.11 Å** vs LigandMPNN **1.00 / 1.37 Å** — UMA wins
+- UMA wins per-PDB pocket RMSD on 8/20 PDBs; big wins: 2wgj (0.31 vs 1.60 Å), 1r0p (1.35 vs 2.43 Å)
+- v3 pocket residue recovery vs LigandMPNN: benchmark still running (2026-05-15)
+- v3 mean distal KL outcome (>15 Å / >25 Å) vs LigandMPNN:
+  - UMA: 0.176 / 0.199  vs  LigandMPNN: 0.012 / 0.010
+  - UMA makes noisier distal AA predictions — ligand-signal present but noisy
+- **Yardstick committed to: A (cofold pass-rate)**
+  - On the shared PDB set, UMA matches or beats LigandMPNN (80% vs 75% PDB-level)
+  - UMA has a genuine edge in ligand placement (0.81 vs 1.00 Å median ligand RMSD)
+  - Cofold pass-rate condition from §3 is borderline met (PDB-level win by +5 pts)
+  - Distogram probe says encoder_weak, but practical outputs don't show it collapsing —
+    the model IS useful despite not encoding clean Cβ-Cβ geometry
+  - v4 goal: fix the geometry grounding (Stage 2 aux heads during training) while
+    keeping the architectural wins that are already working
 
 ---
 
@@ -268,14 +293,16 @@ better data + retraining at slightly relaxed regularization
 | Source | Job | Status | Result |
 |--------|-----|--------|--------|
 | stage 3 final ckpt | `04c_v3_train_stage3_ddp.sh` | **complete** | val/acc=0.6236, val/loss=1.2093 @ep23; ckpt→`uma-inverse-v3.ckpt` |
-| benchmark | `05_benchmark.sh` (v3-final) | **re-queued 2026-05-15** | — |
-| pocket-fixed redesign | `preprint_uma_pocket_fixed.sh` | **re-queued 2026-05-15** | — |
-| Boltz-2 cofold | `preprint_boltz_cofold_v3.sh` | **re-queued 2026-05-15** | — |
-| cofold metrics | `preprint_cofold_metrics_v3.sh` | **re-queued 2026-05-15** | — |
-| distal-KL mechanism | `preprint_distal_kl_shift.sh` (mech) | **re-queued 2026-05-15** | — |
-| distal-KL outcome | `preprint_distal_kl_shift.sh` (outcome) | **re-queued 2026-05-15** | — |
-| distogram probe | `preprint_distogram_probe.sh` | **re-queued 2026-05-15** | — |
-| wallclock probe | inline wrapper in submitter | **re-queued 2026-05-15** | — |
+| benchmark | `05_benchmark.sh` (v3-final) | **running** (6768/7530 @ 2026-05-15) | partial — many OOM skips for large PDBs (expected) |
+| pocket-fixed redesign | `preprint_uma_pocket_fixed.sh` | **complete** | outputs/preprint/uma_pocket_fixed_v3 |
+| Boltz-2 cofold | `preprint_boltz_cofold_v3.sh` | **complete** | outputs/preprint/cofold_v3 |
+| cofold metrics | `preprint_cofold_metrics_v3.sh` | **complete** | UMA 53.7% vs LMPNN 66.0% pass-rate; pocket RMSD best/mean=0.20/3.16 Å |
+| distal-KL mechanism | `preprint_distal_kl_shift.sh` (mech) | **complete** | UMA KL >25Å=0.040 vs LMPNN 0.013 — UMA more ligand-sensitive but noisily |
+| distal-KL outcome | `preprint_distal_kl_shift.sh` (outcome) | **complete** | UMA KL >25Å=0.199 vs LMPNN 0.010 — UMA diverges 20× more from native |
+| distogram probe | `preprint_distogram_probe.sh` | **complete** | top1=0.266, top3=0.588, MAE=3.69Å — **VERDICT: encoder_weak** |
+| wallclock probe | `probe_inference_wallclock.py` | **failed** | ProDy path bug: relative path passed where 4-letter PDB ID expected |
 
-**Trigger:** once all rows above show results, this doc graduates from
-DRAFT to a v4 spec. Until then, every "Stage N" header is a hypothesis.
+**Status:** Benchmark still running; wallclock needs a path fix. All diagnostic
+results are in. Combined verdict: encoder_weak + cofold loss → **trunk rethink
+before features** is the v4 priority. Doc stays in DRAFT until benchmark lands
+and wallclock is fixed, but v4 direction is now determined.

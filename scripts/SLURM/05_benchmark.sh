@@ -31,15 +31,17 @@ BENCH_PDB_DIR="${BENCH_PDB_DIR:-data/raw/pdb_archive}"
 BENCH_OUT_DIR="${BENCH_OUT_DIR:-outputs/benchmark}"
 BENCH_RUN_NAME="${BENCH_RUN_NAME:-${SLURM_JOB_ID:-manual}}"
 BENCH_N="${BENCH_N:-500}"
+BENCH_SKIP_TEMPERATURE="${BENCH_SKIP_TEMPERATURE:-false}"
 
 echo ">> benchmark config:"
-echo "     ckpt       = $BENCH_CKPT"
-echo "     config     = $BENCH_CONFIG"
-echo "     val json   = $BENCH_VAL_JSON"
-echo "     pdb dir    = $BENCH_PDB_DIR"
-echo "     out dir    = $BENCH_OUT_DIR"
-echo "     run name   = $BENCH_RUN_NAME"
-echo "     n pdbs     = $BENCH_N"
+echo "     ckpt              = $BENCH_CKPT"
+echo "     config            = $BENCH_CONFIG"
+echo "     val json          = $BENCH_VAL_JSON"
+echo "     pdb dir           = $BENCH_PDB_DIR"
+echo "     out dir           = $BENCH_OUT_DIR"
+echo "     run name          = $BENCH_RUN_NAME"
+echo "     n pdbs            = $BENCH_N"
+echo "     skip_temperature  = $BENCH_SKIP_TEMPERATURE"
 
 N_FLAG=""
 if [[ "$BENCH_N" == "all" ]]; then
@@ -47,6 +49,9 @@ if [[ "$BENCH_N" == "all" ]]; then
 else
     N_FLAG="--n-pdbs $BENCH_N"
 fi
+
+SKIP_FLAGS=""
+[[ "$BENCH_SKIP_TEMPERATURE" == "true" ]] && SKIP_FLAGS="$SKIP_FLAGS --skip-temperature"
 
 # For v3 ckpts, pass BENCH_CONFIG=configs/config_v3.yaml so the model
 # architecture and ligand featurizer match the ckpt's training-time flags.
@@ -58,6 +63,7 @@ uv run uma-inverse benchmark \
     --out-dir "$BENCH_OUT_DIR" \
     --run-name "$BENCH_RUN_NAME" \
     $N_FLAG \
+    $SKIP_FLAGS \
     --max-total-nodes 5000 \
     -v
 

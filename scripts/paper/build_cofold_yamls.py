@@ -182,12 +182,18 @@ def main() -> None:
         action="store_true",
         help="Skip emitting LigandMPNN YAMLs (e.g., when re-using a prior cofold).",
     )
+    parser.add_argument(
+        "--skip-uma",
+        action="store_true",
+        help="Skip emitting UMA YAMLs (e.g., when building LigandMPNN-only cofold inputs).",
+    )
     args = parser.parse_args()
 
     UMA_METHOD = args.uma_method_name
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
-    (args.out_dir / UMA_METHOD).mkdir(exist_ok=True)
+    if not args.skip_uma:
+        (args.out_dir / UMA_METHOD).mkdir(exist_ok=True)
     if not args.skip_ligandmpnn:
         (args.out_dir / "ligandmpnn").mkdir(exist_ok=True)
 
@@ -265,7 +271,8 @@ def main() -> None:
                     "sample_idx": s_idx, "yaml": str(out_path),
                 })
 
-        _emit(UMA_METHOD, _load_uma_designs(pdb_id, args.uma_dir))
+        if not args.skip_uma:
+            _emit(UMA_METHOD, _load_uma_designs(pdb_id, args.uma_dir))
         if not args.skip_ligandmpnn:
             _emit("ligandmpnn", _load_ligandmpnn_designs(pdb_id, args.ligandmpnn_dir))
 
@@ -274,8 +281,9 @@ def main() -> None:
     record_path.write_text(json.dumps(sampling_record, indent=2))
     logger.info("wrote %s   (%d entries)", record_path, len(sampling_record))
 
-    print(f"\nUMA YAMLs ({UMA_METHOD}): {n_emitted[UMA_METHOD]:>3d}   "
-          f"(missing for {n_missing[UMA_METHOD]} PDBs)")
+    if not args.skip_uma:
+        print(f"\nUMA YAMLs ({UMA_METHOD}): {n_emitted[UMA_METHOD]:>3d}   "
+              f"(missing for {n_missing[UMA_METHOD]} PDBs)")
     if not args.skip_ligandmpnn:
         print(f"LigandMPNN YAMLs:        {n_emitted['ligandmpnn']:>3d}   "
               f"(missing for {n_missing['ligandmpnn']} PDBs)")
