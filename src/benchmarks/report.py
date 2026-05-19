@@ -39,7 +39,7 @@ from src.benchmarks.metrics import (
     perplexity,
     recovery_rate,
 )
-from src.benchmarks.sweeps import LigandAblationRow, TemperatureRow
+from src.benchmarks.sweeps import GibbsRow, LigandAblationRow, TemperatureRow
 from src.utils.io import ID_TO_AA
 
 logger = logging.getLogger(__name__)
@@ -160,6 +160,7 @@ def write_report(
     evaluations: Sequence[PdbEvaluation],
     ablation_rows: Sequence[LigandAblationRow] | None = None,
     temperature_rows: Sequence[TemperatureRow] | None = None,
+    gibbs_rows: Sequence[GibbsRow] | None = None,
     run_metadata: dict | None = None,
 ) -> None:
     """Write every table and figure for one benchmark run.
@@ -232,6 +233,12 @@ def write_report(
     if temperature_rows:
         pd.DataFrame([asdict(r) for r in temperature_rows]).to_csv(
             out_dir / "temperature_sweep.csv", index=False
+        )
+
+    # ── Gibbs sweep
+    if gibbs_rows:
+        pd.DataFrame([asdict(r) for r in gibbs_rows]).to_csv(
+            out_dir / "gibbs_sweep.csv", index=False
         )
 
     # ── Figures

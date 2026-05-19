@@ -193,6 +193,146 @@ class DesignSample:
         return math.exp(mean_logp)
 
 
+# ─── Gibbs (parallel block) design ───────────────────────────────────────────
+
+
+@torch.no_grad()
+def gibbs_design(
+    session: InferenceSession,
+    ctx: StructureContext,
+    constraints: ResolvedConstraints,
+    *,
+    num_samples: int = 1,
+    num_iterations: int = 5,
+    temperature: float = 0.1,
+    top_p: float | None = None,
+    seed: int | None = None,
+) -> list[DesignSample]:
+    """Parallel block Gibbs sampling — the natural generative mode for UMA.
+
+    Each iteration is a single forward pass where every position attends to
+    all other positions simultaneously (no causal mask). This avoids the
+    exposure-bias accumulation of sequential AR decoding and is ~L× cheaper
+    per sample.
+
+    Iteration 0 initialises from structure context only (no sequence input).
+    Iterations 1..K refine using the full bidirectional context over the
+    current sequence.
+
+    Args:
+        session: Session holding the loaded model.
+        ctx: Structure context from :meth:`InferenceSession.load_structure`.
+        constraints: Indexed constraints from :meth:`DesignConstraints.resolve`.
+        num_samples: Total number of independent Gibbs chains to run.
+        num_iterations: Number of Gibbs refinement passes (K). 0 = structure-only.
+        temperature: Sampling temperature applied at every pass.
+        top_p: Optional nucleus threshold.
+        seed: Base seed; chain *i* uses ``seed + i``.
+
+    Returns:
+        A list of ``num_samples`` :class:`DesignSample` records.
+    """
+    device = ctx.device
+    model = session.model
+    L = ctx.residue_count
+
+    z = ctx.z.expand(1, -1, -1, -1)
+    node_repr_res = ctx.node_repr_res.expand(1, -1, -1)
+    lig_ctx = ctx.lig_ctx.expand(1, -1, -1)
+    residue_mask = ctx.residue_mask.expand(1, -1)
+    native = ctx.native_sequence  # [L]
+
+    designable_mask = constraints.designable_mask  # [L]
+    fixed_mask = ~designable_mask
+    bias_global = constraints.bias_global
+    bias_per_pos = constraints.bias_per_residue
+    omit_global = constraints.omit_global
+    omit_per_pos = constraints.omit_per_residue
+
+    designable_indices = torch.nonzero(designable_mask, as_tuple=False).squeeze(-1)
+
+    base_seed = seed if seed is not None else int(torch.randint(0, 2**31 - 1, (1,)).item())
+
+    samples: list[DesignSample] = []
+    for i in range(num_samples):
+        gen = torch.Generator(device=device).manual_seed(base_seed + i)
+
+        # Initialise: fixed positions hold native, designable hold X.
+        seq = torch.full((1, L), fill_value=20, dtype=torch.long, device=device)
+        seq[0, fixed_mask] = native[fixed_mask]
+
+        # Iter 0: structure-only logits (sequence=None → zero context).
+        ar_ctx_0 = torch.zeros(1, L, model.node_dim, dtype=z.dtype, device=device)
+        decoder_input = torch.cat([node_repr_res, ar_ctx_0, lig_ctx], dim=-1)
+        logits = model.decoder(decoder_input)  # [1, L, 21]
+
+        # Sample all designable positions.
+        for pos in designable_indices:
+            l_pos = logits[0, pos]  # [21]
+            tok, _ = sample_next(
+                l_pos.unsqueeze(0),
+                temperature=temperature,
+                top_p=top_p,
+                bias=bias_global + bias_per_pos[pos],
+                forbidden_mask=omit_global | omit_per_pos[pos],
+                generator=gen,
+            )
+            seq[0, pos] = tok[0]
+
+        # Iters 1..K: full bidirectional context.
+        for _ in range(num_iterations):
+            ar_ctx = model._autoregressive_context(
+                z=z,
+                sequence=seq,
+                residue_mask=residue_mask,
+                full_context=True,
+            )  # [1, L, node_dim]
+            decoder_input = torch.cat([node_repr_res, ar_ctx, lig_ctx], dim=-1)
+            logits = model.decoder(decoder_input)  # [1, L, 21]
+
+            for pos in designable_indices:
+                l_pos = logits[0, pos]
+                tok, _ = sample_next(
+                    l_pos.unsqueeze(0),
+                    temperature=temperature,
+                    top_p=top_p,
+                    bias=bias_global + bias_per_pos[pos],
+                    forbidden_mask=omit_global | omit_per_pos[pos],
+                    generator=gen,
+                )
+                seq[0, pos] = tok[0]
+
+        # Collect log-probs and full-prob distribution from the final logits.
+        log_probs = torch.zeros(L, device=device)
+        probs_full = torch.zeros(L, 21, device=device)
+        for pos in designable_indices:
+            l_pos = logits[0, pos]
+            bias = bias_global + bias_per_pos[pos]
+            forbidden = omit_global | omit_per_pos[pos]
+            l_adj = l_pos / max(temperature, 1e-6) + bias
+            l_adj = l_adj.masked_fill(forbidden, float("-inf"))
+            if top_p is not None:
+                l_adj = _apply_top_p(l_adj.unsqueeze(0), top_p=top_p).squeeze(0)
+            p = torch.softmax(l_adj, dim=-1)
+            probs_full[pos] = p
+            log_probs[pos] = torch.log(p[seq[0, pos]].clamp_min(1e-9))
+
+        samples.append(
+            DesignSample(
+                token_ids=seq[0].cpu(),
+                log_probs=log_probs.cpu(),
+                probs_full=probs_full.cpu(),
+                decoding_order=torch.zeros(L, dtype=torch.long),
+                seed=base_seed + i,
+                temperature=temperature,
+                top_p=top_p,
+                tied_groups=[list(group) for group, _ in constraints.ties],
+            )
+        )
+
+    return samples
+
+
 # ─── Autoregressive design ────────────────────────────────────────────────────
 
 

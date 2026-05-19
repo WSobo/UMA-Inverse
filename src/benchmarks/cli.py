@@ -23,6 +23,7 @@ from src.benchmarks.evaluation import evaluate_validation_set
 from src.benchmarks.report import write_report
 from src.benchmarks.sweeps import (
     format_timing,
+    run_gibbs_sweep,
     run_ligand_ablation,
     run_temperature_sweep,
 )
@@ -110,6 +111,10 @@ def benchmark(
         help="Comma-separated list of sampling temperatures."),
     samples_per_pdb: int = typer.Option(3, "--samples-per-pdb", min=2,
         help="Samples at each T per PDB (for diversity measurements)."),
+    skip_gibbs: bool = typer.Option(True, "--skip-gibbs/--no-skip-gibbs",
+        help="Skip the Gibbs sampling sweep (default: skipped; use --no-skip-gibbs to enable)."),
+    gibbs_iterations: str = typer.Option("0,1,2,3,5", "--gibbs-iterations",
+        help="Comma-separated Gibbs iteration counts for the sweep."),
     # ── Environment ──────────────────────────────────────────────────────────
     device: str = typer.Option("auto", "--device", help="'cuda', 'cpu', or 'auto'."),
     verbose: int = typer.Option(0, "--verbose", "-v", count=True),
@@ -212,6 +217,25 @@ def benchmark(
         )
         logger.info("sweep finished in %s", format_timing(time.perf_counter() - t_sweep))
 
+    # ── Pass 4: Gibbs sampling sweep ─────────────────────────────────────────
+    gibbs_rows = None
+    if not skip_gibbs:
+        logger.info("Gibbs sweep: iterations=%s", gibbs_iterations)
+        t_gibbs = time.perf_counter()
+        gibbs_rows = run_gibbs_sweep(
+            session=session,
+            val_json=val_json,
+            pdb_dir=pdb_dir,
+            iteration_counts=[int(x) for x in gibbs_iterations.split(",")],
+            num_samples_per_pdb=samples_per_pdb,
+            temperature=0.1,
+            n_pdbs=resolved_n_pdbs,
+            max_total_nodes=max_total_nodes,
+            seed=seed,
+            progress_callback=progress,
+        )
+        logger.info("Gibbs sweep finished in %s", format_timing(time.perf_counter() - t_gibbs))
+
     # ── Report ───────────────────────────────────────────────────────────────
     logger.info("aggregating report")
     write_report(
@@ -219,6 +243,7 @@ def benchmark(
         evaluations=evaluations,
         ablation_rows=ablation_rows,
         temperature_rows=temperature_rows,
+        gibbs_rows=gibbs_rows,
         run_metadata={
             "checkpoint_path": str(ckpt),
             "checkpoint_sha256": manifest.checkpoint_sha256,

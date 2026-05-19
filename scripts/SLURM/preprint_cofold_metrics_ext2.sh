@@ -37,7 +37,7 @@ uv run python scripts/paper/cofold_metrics.py \
 
 echo ">> cofold_metrics ext2 (pass B: new ext2 results)"
 uv run python scripts/paper/cofold_metrics.py \
-    --sampling-record "${PROJ}/outputs/preprint/boltz_inputs/cofold_v3_ext2/sampling_record.json" \
+    --sampling-record "${PROJ}/outputs/preprint/boltz_inputs/cofold_v3_ext2/sampling_record_merged.json" \
     --cofold-base "${PROJ}/outputs/preprint/cofold_v3_ext2" \
     --selection "${SELECTION}" \
     --out "${OUT_B}"

@@ -27,7 +27,7 @@ from src.benchmarks.evaluation import evaluate_validation_set
 from src.benchmarks.metrics import hamming_diversity, recovery_rate
 from src.data.ligandmpnn_bridge import load_json_ids, resolve_pdb_path
 from src.inference.constraints import DesignConstraints
-from src.inference.decoding import autoregressive_design
+from src.inference.decoding import autoregressive_design, gibbs_design
 from src.inference.session import InferenceSession
 
 logger = logging.getLogger(__name__)
@@ -219,6 +219,125 @@ def run_temperature_sweep(
                 mean_log_prob=float(np.mean(log_probs)),
             )
         )
+    return rows
+
+
+# ─── Gibbs sweep ─────────────────────────────────────────────────────────────
+
+
+@dataclass
+class GibbsRow:
+    """One row in ``gibbs_sweep.csv`` — stats for one iteration count."""
+
+    num_iterations: int
+    num_pdbs: int
+    num_samples_per_pdb: int
+    mean_recovery: float
+    std_recovery: float
+    mean_hamming_diversity: float
+    mean_overall_confidence: float
+    mean_log_prob: float
+
+
+def run_gibbs_sweep(
+    session: InferenceSession,
+    val_json: Path | str,
+    pdb_dir: Path | str,
+    *,
+    iteration_counts: list[int],
+    num_samples_per_pdb: int = 3,
+    temperature: float = 0.1,
+    top_p: float | None = None,
+    n_pdbs: int | None = None,
+    max_total_nodes: int | None = None,
+    seed: int = 0,
+    progress_callback=None,
+) -> list[GibbsRow]:
+    """Run parallel block Gibbs sampling at each iteration count.
+
+    For each K in ``iteration_counts``, samples ``num_samples_per_pdb``
+    sequences per PDB and reports recovery + diversity. Encodes each
+    structure once; K=0 is structure-only (no sequence context).
+    """
+    ids = load_json_ids(str(val_json))
+    if n_pdbs is not None and n_pdbs < len(ids):
+        rng = np.random.default_rng(seed)
+        chosen = rng.choice(len(ids), size=n_pdbs, replace=False)
+        ids = [ids[int(i)] for i in sorted(chosen)]
+
+    paths: list[Path] = []
+    for pdb_id in ids:
+        p = resolve_pdb_path(str(pdb_dir), pdb_id)
+        if p is not None:
+            paths.append(Path(p))
+
+    rows: list[GibbsRow] = []
+    unconstrained = DesignConstraints.from_cli()
+
+    for k_idx, k in enumerate(iteration_counts):
+        recoveries: list[float] = []
+        diversities: list[float] = []
+        confidences: list[float] = []
+        log_probs_list: list[float] = []
+
+        for p_idx, path in enumerate(paths):
+            if progress_callback is not None:
+                progress_callback(
+                    k_idx * len(paths) + p_idx,
+                    len(iteration_counts) * len(paths),
+                    f"K={k}:{path.stem}",
+                )
+
+            try:
+                ctx = session.load_structure(path, max_total_nodes=max_total_nodes)
+            except Exception as exc:
+                logger.warning("skipping %s at K=%s: %s", path, k, exc)
+                continue
+            resolved = unconstrained.resolve(ctx)
+            samples = gibbs_design(
+                session=session,
+                ctx=ctx,
+                constraints=resolved,
+                num_samples=num_samples_per_pdb,
+                num_iterations=k,
+                temperature=temperature,
+                top_p=top_p,
+                seed=int(seed + p_idx),
+            )
+
+            native = ctx.native_sequence.cpu()
+            for s in samples:
+                recoveries.append(recovery_rate(s.token_ids, native))
+                log_probs_list.append(
+                    float(s.log_probs[resolved.designable_mask.cpu()].mean().item())
+                )
+                confidences.append(s.overall_confidence(resolved.designable_mask.cpu()))
+
+            if len(samples) > 1:
+                diversities.append(
+                    hamming_diversity([s.token_ids for s in samples])
+                )
+
+        if not recoveries:
+            logger.warning("no samples for K=%s", k)
+            continue
+
+        rows.append(
+            GibbsRow(
+                num_iterations=k,
+                num_pdbs=len(paths),
+                num_samples_per_pdb=num_samples_per_pdb,
+                mean_recovery=float(np.mean(recoveries)),
+                std_recovery=float(np.std(recoveries)),
+                mean_hamming_diversity=float(np.mean(diversities)) if diversities else 0.0,
+                mean_overall_confidence=float(np.mean(confidences)),
+                mean_log_prob=float(np.mean(log_probs_list)),
+            )
+        )
+        logger.info("Gibbs K=%d: recovery=%.4f ± %.4f  diversity=%.4f",
+                    k, rows[-1].mean_recovery, rows[-1].std_recovery,
+                    rows[-1].mean_hamming_diversity)
+
     return rows
 
 
