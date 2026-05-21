@@ -219,10 +219,11 @@ def benchmark(
 
     # ── Pass 4: Gibbs sampling sweep ─────────────────────────────────────────
     gibbs_rows = None
+    gibbs_per_pdb_rows = None
     if not skip_gibbs:
         logger.info("Gibbs sweep: iterations=%s", gibbs_iterations)
         t_gibbs = time.perf_counter()
-        gibbs_rows = run_gibbs_sweep(
+        gibbs_rows, gibbs_per_pdb_rows = run_gibbs_sweep(
             session=session,
             val_json=val_json,
             pdb_dir=pdb_dir,
@@ -244,6 +245,7 @@ def benchmark(
         ablation_rows=ablation_rows,
         temperature_rows=temperature_rows,
         gibbs_rows=gibbs_rows,
+        gibbs_per_pdb_rows=gibbs_per_pdb_rows,
         run_metadata={
             "checkpoint_path": str(ckpt),
             "checkpoint_sha256": manifest.checkpoint_sha256,

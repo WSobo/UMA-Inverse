@@ -21,6 +21,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
+import torch
 import numpy as np
 
 from src.benchmarks.evaluation import evaluate_validation_set
@@ -239,6 +240,17 @@ class GibbsRow:
     mean_log_prob: float
 
 
+@dataclass
+class GibbsPerPdbRow:
+    """One row in ``gibbs_per_pdb.csv`` — per-PDB sampled recovery for one K."""
+
+    pdb_id: str
+    num_iterations: int
+    num_samples: int
+    mean_recovery: float
+    std_recovery: float
+
+
 def run_gibbs_sweep(
     session: InferenceSession,
     val_json: Path | str,
@@ -252,7 +264,7 @@ def run_gibbs_sweep(
     max_total_nodes: int | None = None,
     seed: int = 0,
     progress_callback=None,
-) -> list[GibbsRow]:
+) -> tuple[list[GibbsRow], list[GibbsPerPdbRow]]:
     """Run parallel block Gibbs sampling at each iteration count.
 
     For each K in ``iteration_counts``, samples ``num_samples_per_pdb``
@@ -272,6 +284,7 @@ def run_gibbs_sweep(
             paths.append(Path(p))
 
     rows: list[GibbsRow] = []
+    per_pdb_rows: list[GibbsPerPdbRow] = []
     unconstrained = DesignConstraints.from_cli()
 
     for k_idx, k in enumerate(iteration_counts):
@@ -306,8 +319,11 @@ def run_gibbs_sweep(
             )
 
             native = ctx.native_sequence.cpu()
+            pdb_recoveries: list[float] = []
             for s in samples:
-                recoveries.append(recovery_rate(s.token_ids, native))
+                r = recovery_rate(s.token_ids, native)
+                recoveries.append(r)
+                pdb_recoveries.append(r)
                 log_probs_list.append(
                     float(s.log_probs[resolved.designable_mask.cpu()].mean().item())
                 )
@@ -317,6 +333,14 @@ def run_gibbs_sweep(
                 diversities.append(
                     hamming_diversity([s.token_ids for s in samples])
                 )
+
+            per_pdb_rows.append(GibbsPerPdbRow(
+                pdb_id=path.stem,
+                num_iterations=k,
+                num_samples=len(samples),
+                mean_recovery=float(np.mean(pdb_recoveries)),
+                std_recovery=float(np.std(pdb_recoveries)),
+            ))
 
         if not recoveries:
             logger.warning("no samples for K=%s", k)
@@ -337,8 +361,9 @@ def run_gibbs_sweep(
         logger.info("Gibbs K=%d: recovery=%.4f ± %.4f  diversity=%.4f",
                     k, rows[-1].mean_recovery, rows[-1].std_recovery,
                     rows[-1].mean_hamming_diversity)
+        torch.cuda.empty_cache()
 
-    return rows
+    return rows, per_pdb_rows
 
 
 # ─── Shared utility: timing reporter ──────────────────────────────────────────

@@ -330,7 +330,7 @@ def main() -> None:
         summary_rows.append({
             "pdb_id": pdb_id,
             "kind": kind,
-            "method": "uma_v2",
+            "method": "uma_v3",
             "n_residues": ctx.residue_count,
             "n_fixed": n_fixed,
             "n_designable": n_designable,
@@ -359,7 +359,7 @@ def main() -> None:
 
     # Top-level meta
     args.out_dir.joinpath("run_meta.json").write_text(json.dumps({
-        "method": "uma_v2",
+        "method": "uma_v3",
         "ckpt": str(args.ckpt),
         "ckpt_stem": args.ckpt.stem,
         "num_samples_per_pdb": args.num_samples,

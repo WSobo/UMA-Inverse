@@ -68,7 +68,7 @@ def main() -> None:
     by_pdb: dict[str, dict[str, dict]] = defaultdict(dict)
     for r in rows:
         by_pdb[r["pdb_id"]][r["method"]] = r
-    paired = [pid for pid, d in by_pdb.items() if "uma_v2" in d and "ligandmpnn" in d]
+    paired = [pid for pid, d in by_pdb.items() if "uma_v3" in d and "ligandmpnn" in d]
 
     fig, axes = plt.subplots(2, 2, figsize=(11, 9))
 
@@ -76,22 +76,22 @@ def main() -> None:
     for col, split_filter, split_name in ((0, "small_molecule", "Small molecule"),
                                             (1, "metal", "Metal")):
         ax = axes[0, col]
-        pids = [pid for pid in paired if by_pdb[pid]["uma_v2"]["kind"] == split_filter]
+        pids = [pid for pid in paired if by_pdb[pid]["uma_v3"]["kind"] == split_filter]
         if not pids:
             ax.set_title(f"{split_name}  (no paired data yet)")
             continue
-        uma_div = [by_pdb[pid]["uma_v2"]["mean_pairwise_hamming_distal"] for pid in pids]
+        uma_div = [by_pdb[pid]["uma_v3"]["mean_pairwise_hamming_distal"] for pid in pids]
         lig_div = [by_pdb[pid]["ligandmpnn"]["mean_pairwise_hamming_distal"] for pid in pids]
         x_uma = np.full(len(pids), 0)
         x_lig = np.full(len(pids), 1)
         for u, lig in zip(uma_div, lig_div):
             ax.plot([0, 1], [u, lig], color="#888", alpha=0.5, linewidth=0.7)
         ax.scatter(x_uma, uma_div, color="#2C5F8E", s=50, edgecolor="black", linewidth=0.5,
-                   label="UMA-v2", zorder=10)
+                   label="UMA-Inverse-1", zorder=10)
         ax.scatter(x_lig, lig_div, color="#C13C3C", s=50, edgecolor="black", linewidth=0.5,
                    label="LigandMPNN", zorder=10)
         ax.set_xticks([0, 1])
-        ax.set_xticklabels(["UMA-v2", "LigandMPNN"], fontsize=10)
+        ax.set_xticklabels(["UMA-Inverse-1", "LigandMPNN"], fontsize=10)
         ax.set_xlim(-0.5, 1.5)
         ax.set_ylabel("Mean pairwise Hamming distance\n(at distal positions)", fontsize=9)
         ax.grid(axis="y", alpha=0.3, linestyle="--", linewidth=0.5)
@@ -102,18 +102,18 @@ def main() -> None:
     for col, split_filter, split_name in ((0, "small_molecule", "Small molecule"),
                                             (1, "metal", "Metal")):
         ax = axes[1, col]
-        pids = [pid for pid in paired if by_pdb[pid]["uma_v2"]["kind"] == split_filter]
+        pids = [pid for pid in paired if by_pdb[pid]["uma_v3"]["kind"] == split_filter]
         if not pids:
             ax.set_title(f"{split_name}  (no paired data yet)")
             continue
         for pid in pids:
-            uma = by_pdb[pid]["uma_v2"]
+            uma = by_pdb[pid]["uma_v3"]
             lig = by_pdb[pid]["ligandmpnn"]
             ax.plot([uma["mean_distal_recovery"], lig["mean_distal_recovery"]],
                     [uma["mean_pairwise_hamming_distal"], lig["mean_pairwise_hamming_distal"]],
                     color="#888", alpha=0.4, linewidth=0.6)
         for pid in pids:
-            uma = by_pdb[pid]["uma_v2"]
+            uma = by_pdb[pid]["uma_v3"]
             lig = by_pdb[pid]["ligandmpnn"]
             ax.scatter(uma["mean_distal_recovery"], uma["mean_pairwise_hamming_distal"],
                        color="#2C5F8E", s=40, edgecolor="black", linewidth=0.5, zorder=10)
@@ -124,10 +124,11 @@ def main() -> None:
         ax.grid(alpha=0.3, linestyle="--", linewidth=0.5)
         ax.set_axisbelow(True)
         ax.set_title(f"{split_name}", fontsize=11)
-        ax.legend(["paired (UMA, LigMPNN)", "UMA-v2", "LigandMPNN"], fontsize=8, loc="best")
+        ax.legend(["paired (UMA-Inverse-1, LigMPNN)", "UMA-Inverse-1", "LigandMPNN"],
+                  fontsize=8, loc="best")
 
     fig.suptitle(
-        "Pocket-fixed redesign: distal-position diversity and recovery, UMA-v2 vs LigandMPNN",
+        "Pocket-fixed redesign: distal-position diversity and recovery, UMA-Inverse-1 vs LigandMPNN",
         fontsize=11, y=1.0,
     )
     plt.tight_layout()

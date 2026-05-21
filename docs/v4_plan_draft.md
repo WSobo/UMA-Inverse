@@ -293,7 +293,7 @@ better data + retraining at slightly relaxed regularization
 | Source | Job | Status | Result |
 |--------|-----|--------|--------|
 | stage 3 final ckpt | `04c_v3_train_stage3_ddp.sh` | **complete** | val/acc=0.6236, val/loss=1.2093 @ep23; ckpt→`uma-inverse-v3.ckpt` |
-| benchmark | `05_benchmark.sh` (v3-final) | **running** (6768/7530 @ 2026-05-15) | partial — many OOM skips for large PDBs (expected) |
+| benchmark | `05_benchmark.sh` (v3-final) | **complete** | v3-final: 1727 PDBs, mean recovery see summary.json; K=0 sampled: UMA-Inverse-1=0.4637, LigandMPNN-matched=0.5389 |
 | pocket-fixed redesign | `preprint_uma_pocket_fixed.sh` | **complete** | outputs/preprint/uma_pocket_fixed_v3 |
 | Boltz-2 cofold | `preprint_boltz_cofold_v3.sh` | **complete** | outputs/preprint/cofold_v3 |
 | cofold metrics | `preprint_cofold_metrics_v3.sh` | **complete** | UMA 53.7% vs LMPNN 66.0% pass-rate; pocket RMSD best/mean=0.20/3.16 Å |
@@ -302,7 +302,6 @@ better data + retraining at slightly relaxed regularization
 | distogram probe | `preprint_distogram_probe.sh` | **complete** | top1=0.266, top3=0.588, MAE=3.69Å — **VERDICT: encoder_weak** |
 | wallclock probe | `probe_inference_wallclock.py` | **failed** | ProDy path bug: relative path passed where 4-letter PDB ID expected |
 
-**Status:** Benchmark still running; wallclock needs a path fix. All diagnostic
-results are in. Combined verdict: encoder_weak + cofold loss → **trunk rethink
-before features** is the v4 priority. Doc stays in DRAFT until benchmark lands
-and wallclock is fixed, but v4 direction is now determined.
+**Status:** All benchmarks complete. K=0 sampled recovery: UMA-Inverse-1=0.4637 vs
+LigandMPNN=0.5389 on matched 2000-PDB val set. Wallclock probe still needs path
+fix. v4 direction determined: trunk rethink (aux geometry heads) before features.

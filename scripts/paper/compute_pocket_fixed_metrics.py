@@ -203,6 +203,11 @@ def main() -> None:
         default=PROJECT_ROOT / "outputs" / "preprint" / "uma_pocket_fixed",
     )
     parser.add_argument(
+        "--uma-method",
+        default="uma_v3",
+        help="Method label written to the output CSVs for UMA designs.",
+    )
+    parser.add_argument(
         "--ligandmpnn-dir",
         type=Path,
         default=PROJECT_ROOT / "outputs" / "preprint" / "ligandmpnn_pocket_fixed",
@@ -258,17 +263,17 @@ def main() -> None:
         if uma_designs:
             for s_idx, seq in enumerate(uma_designs):
                 per_sample_rows.append({
-                    "pdb_id": pdb_id, "kind": kind, "method": "uma_v2",
+                    "pdb_id": pdb_id, "kind": kind, "method": args.uma_method,
                     "sample_idx": s_idx,
                     "distal_recovery": _per_position_recovery(seq, native_seq, distal_mask),
                     "pocket_recovery": _per_position_recovery(seq, native_seq, pocket_mask),
                 })
             distals = [r["distal_recovery"] for r in per_sample_rows
-                       if r["pdb_id"] == pdb_id and r["method"] == "uma_v2"]
+                       if r["pdb_id"] == pdb_id and r["method"] == args.uma_method]
             pocket_recs = [r["pocket_recovery"] for r in per_sample_rows
-                           if r["pdb_id"] == pdb_id and r["method"] == "uma_v2"]
+                           if r["pdb_id"] == pdb_id and r["method"] == args.uma_method]
             summary_rows.append({
-                "pdb_id": pdb_id, "kind": kind, "method": "uma_v2",
+                "pdb_id": pdb_id, "kind": kind, "method": args.uma_method,
                 "n_samples": len(uma_designs),
                 "n_residues": L, "n_pocket": int(pocket_mask.sum()),
                 "n_distal": int(distal_mask.sum()),
@@ -280,7 +285,7 @@ def main() -> None:
             })
             for aa, freq in _per_aa_freq(uma_designs, distal_mask).items():
                 aa_freq_rows.append({
-                    "pdb_id": pdb_id, "kind": kind, "method": "uma_v2",
+                    "pdb_id": pdb_id, "kind": kind, "method": args.uma_method,
                     "aa": aa, "freq_distal": freq,
                 })
         else:

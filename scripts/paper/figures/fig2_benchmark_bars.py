@@ -1,13 +1,15 @@
 """Figure 2: standard interface-recovery benchmark bar chart.
 
-Three panels (metal, small_molecule, nucleotide-caveat-only). Four bars per
-panel: UMA-v2, UMA-v1, LigandMPNN (paper), ProteinMPNN (paper).
+Three panels (metal, small_molecule, nucleotide-caveat-only). Primary bars
+are UMA-Inverse-1 (v3), LigandMPNN (paper), ProteinMPNN (paper). Supplemental
+comparison bars for UMA-v2 and UMA-v1 are included lighter.
 
 Sources:
-    UMA-v2 (per-PDB):  outputs/benchmark/interface_recovery/v2-ep19-test_<cls>/per_pdb.csv
-    UMA-v1 (per-PDB):  outputs/benchmark/interface_recovery/ep11-test_<cls>/per_pdb.csv
-    LigandMPNN paper:  hardcoded from Dauparas et al.
-    ProteinMPNN paper: hardcoded from Dauparas et al.
+    UMA-Inverse-1 (v3) per-PDB: outputs/benchmark/interface_recovery/v3-ep23-test_<cls>/per_pdb.csv
+    UMA-v2 (per-PDB):           outputs/benchmark/interface_recovery/v2-ep19-test_<cls>/per_pdb.csv
+    UMA-v1 (per-PDB):           outputs/benchmark/interface_recovery/ep11-test_<cls>/per_pdb.csv
+    LigandMPNN paper:            hardcoded from Dauparas et al.
+    ProteinMPNN paper:           hardcoded from Dauparas et al.
 
 Output:
     outputs/preprint/figures/fig2_benchmark_bars.{pdf,png}
@@ -64,27 +66,34 @@ def main() -> None:
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
     splits = ("metal", "small_molecule", "nucleotide")
-    fig, axes = plt.subplots(1, 3, figsize=(11, 4), sharey=True)
+    fig, axes = plt.subplots(1, 3, figsize=(13, 4), sharey=True)
 
-    methods = ("UMA-v2", "UMA-v1", "LigandMPNN", "ProteinMPNN")
+    # Order: UMA-Inverse-1 (v3, primary), LigandMPNN, ProteinMPNN, UMA-v2 (supp.), UMA-v1 (supp.)
+    methods = ("UMA-Inverse-1", "LigandMPNN", "ProteinMPNN", "UMA-v2", "UMA-v1")
     colors = {
-        "UMA-v2":      "#2C5F8E",
-        "UMA-v1":      "#7CA9CD",
-        "LigandMPNN":  "#C13C3C",
-        "ProteinMPNN": "#888888",
+        "UMA-Inverse-1": "#2C5F8E",
+        "LigandMPNN":    "#C13C3C",
+        "ProteinMPNN":   "#888888",
+        "UMA-v2":        "#7CA9CD",
+        "UMA-v1":        "#B0CEDF",
     }
 
     for ax, split in zip(axes, splits):
+        v3_meds = _load_pdb_medians(args.bench_dir / f"v3-ep23-test_{split}" / "per_pdb.csv")
         v2_meds = _load_pdb_medians(args.bench_dir / f"v2-ep19-test_{split}" / "per_pdb.csv")
         v1_meds = _load_pdb_medians(args.bench_dir / f"ep11-test_{split}" / "per_pdb.csv")
 
-        v2_mean = float(np.mean(v2_meds)) if v2_meds else float("nan")
-        v2_err = float(np.std(v2_meds, ddof=0) / np.sqrt(len(v2_meds))) if v2_meds else 0.0
-        v1_mean = float(np.mean(v1_meds)) if v1_meds else float("nan")
-        v1_err = float(np.std(v1_meds, ddof=0) / np.sqrt(len(v1_meds))) if v1_meds else 0.0
+        def _mean_err(meds):
+            if not meds:
+                return float("nan"), 0.0
+            return float(np.mean(meds)), float(np.std(meds, ddof=0) / np.sqrt(len(meds)))
 
-        values = [v2_mean, v1_mean, LIGANDMPNN_REF[split], PROTEINMPNN_REF[split]]
-        errors = [v2_err, v1_err, 0.0, 0.0]  # paper numbers: no per-PDB error available
+        v3_mean, v3_err = _mean_err(v3_meds)
+        v2_mean, v2_err = _mean_err(v2_meds)
+        v1_mean, v1_err = _mean_err(v1_meds)
+
+        values = [v3_mean, LIGANDMPNN_REF[split], PROTEINMPNN_REF[split], v2_mean, v1_mean]
+        errors = [v3_err, 0.0, 0.0, v2_err, v1_err]
 
         x = np.arange(len(methods))
         bars = ax.bar(
@@ -98,16 +107,19 @@ def main() -> None:
                 ax.text(bar.get_x() + bar.get_width() / 2, val + 0.015,
                         f"{val:.3f}", ha="center", va="bottom", fontsize=8)
 
+        # Vertical separator between primary and supplemental bars
+        ax.axvline(2.5, color="#aaa", linestyle="--", linewidth=0.8, alpha=0.7)
+        ax.text(2.55, 0.02, "suppl.", fontsize=7, color="#aaa", va="bottom")
+
         ax.set_xticks(x)
         ax.set_xticklabels(methods, rotation=20, ha="right", fontsize=9)
-        n_label = f" (N={len(v2_meds)})" if v2_meds else ""
+        n_label = f" (N={len(v3_meds)})" if v3_meds else f" (N={len(v2_meds)}, v2)"
         ax.set_title(f"{split.replace('_', ' ').title()}{n_label}", fontsize=11)
         ax.set_ylim(0, 1.0)
         ax.grid(axis="y", alpha=0.3, linestyle="--", linewidth=0.5)
         ax.set_axisbelow(True)
         if split == splits[0]:
             ax.set_ylabel("Interface sequence recovery", fontsize=10)
-        # Highlight if this is the nucleotide caveat panel
         if split == "nucleotide":
             ax.text(0.5, 0.97, "(featurizer ablation;\nnot a fair comparison)",
                     transform=ax.transAxes, ha="center", va="top",
@@ -115,7 +127,8 @@ def main() -> None:
 
     fig.suptitle(
         "Interface sequence recovery, LigandMPNN-paper protocol\n"
-        "(10 designs/PDB, T=0.1, random decoding, 5Å sidechain cutoff)",
+        "(10 designs/PDB, T=0.1, random decoding, 5Å sidechain cutoff) — "
+        "UMA-v2/v1 bars are supplemental",
         fontsize=11, y=1.0,
     )
     plt.tight_layout()

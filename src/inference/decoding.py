@@ -279,13 +279,28 @@ def gibbs_design(
             )
             seq[0, pos] = tok[0]
 
-        # Iters 1..K: full bidirectional context.
-        for _ in range(num_iterations):
+        # Iters 1..K: causal context with a fresh random decoding order each
+        # iteration.  Fixed positions are ranked first so every designable
+        # position can attend to them; designable positions are permuted
+        # randomly.  This keeps the attention pattern in-distribution (the
+        # model was only trained with causal masks, never full_context=True).
+        fixed_indices = torch.nonzero(fixed_mask, as_tuple=False).squeeze(-1)
+        n_des = designable_indices.numel()
+
+        for k_iter in range(num_iterations):
+            g_order = torch.Generator(device="cpu").manual_seed(
+                base_seed + i * num_iterations + k_iter
+            )
+            perm = torch.randperm(n_des, generator=g_order).to(device)
+            ordered = torch.cat([fixed_indices, designable_indices[perm]])
+            ranks = torch.empty(L, dtype=torch.long, device=device)
+            ranks[ordered] = torch.arange(L, device=device)
+
             ar_ctx = model._autoregressive_context(
                 z=z,
                 sequence=seq,
                 residue_mask=residue_mask,
-                full_context=True,
+                decoding_order=ranks.unsqueeze(0),
             )  # [1, L, node_dim]
             decoder_input = torch.cat([node_repr_res, ar_ctx, lig_ctx], dim=-1)
             logits = model.decoder(decoder_input)  # [1, L, 21]
