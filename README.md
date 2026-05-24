@@ -146,10 +146,10 @@ UMA-Inverse uses a stack of PairMixer blocks (triangle multiplication outgoing/i
 
 Standard interface-recovery benchmark (LigandMPNN test splits, 10 designs per PDB, sidechain ≤ 5 Å cutoff):
 
-| Split | UMA-v2 | LigandMPNN | ProteinMPNN |
+| Split | UMA-Inverse-1 | LigandMPNN | ProteinMPNN |
 |---|---:|---:|---:|
 | Metal | 0.486 | 0.775 | 0.406 |
-| Small molecule | 0.538 | 0.633 | 0.505 |
+| Small molecule | 0.545 | 0.633 | 0.505 |
 
 The preprint (bioRxiv, link added on submission) characterizes a regime — **pocket-fixed redesign** — where UMA-Inverse's dense attention shows a structural advantage that local KNN message-passing does not capture.
 
