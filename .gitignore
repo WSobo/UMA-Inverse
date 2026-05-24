@@ -46,6 +46,7 @@ ligandMPNN_example_notebook.ipynb
 # Local-private docs (preprint source, planning notes — kept locally only)
 docs/private/
 docs/v4_plan_draft.md
+ARCHITECTURE_SPEC.md
 
 # Preprint (kept locally, not tracked in repo)
 docs/preprint*.tex
