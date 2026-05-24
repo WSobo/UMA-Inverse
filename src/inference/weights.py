@@ -1,12 +1,12 @@
 """Resolve the UMA-Inverse checkpoint path.
 
 Used by the CLI (and ``scripts/download_weights.py``) to either honour an
-explicit user-supplied checkpoint or auto-fetch the canonical v2 weights
+explicit user-supplied checkpoint or auto-fetch the canonical weights
 from Hugging Face Hub on first use.
 
 Cache location (XDG-compliant):
-    $XDG_CACHE_HOME/uma-inverse/uma-inverse-v2.ckpt
-    ~/.cache/uma-inverse/uma-inverse-v2.ckpt   (default)
+    $XDG_CACHE_HOME/uma-inverse/uma-inverse-1.ckpt
+    ~/.cache/uma-inverse/uma-inverse-1.ckpt   (default)
 """
 from __future__ import annotations
 
@@ -17,9 +17,9 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_REPO_ID = "WSobo/UMA-Inverse_v2"
-DEFAULT_FILENAME = "uma-inverse-19-1.1463.ckpt"
-DEFAULT_CACHE_NAME = "uma-inverse-v2.ckpt"
+DEFAULT_REPO_ID = "WSobo/Uma-Inverse-1"
+DEFAULT_FILENAME = "uma-inverse-23-1.2093.ckpt"
+DEFAULT_CACHE_NAME = "uma-inverse-1.ckpt"
 
 # Anything smaller is almost certainly a partial / failed download.
 MIN_REASONABLE_CKPT_BYTES = 10 * 1024 * 1024  # 10 MB
@@ -92,7 +92,7 @@ def resolve_checkpoint(ckpt: Path | None) -> Path:
     """Return a usable checkpoint path for inference.
 
     - If ``ckpt`` is given, validate that the file exists and return it.
-    - Otherwise, return (and lazily fetch) the canonical v2 checkpoint
+    - Otherwise, return (and lazily fetch) the canonical checkpoint
       from Hugging Face into the user cache.
     """
     if ckpt is not None:

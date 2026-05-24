@@ -1,4 +1,4 @@
-"""Pre-fetch UMA-Inverse v2 weights from Hugging Face.
+"""Pre-fetch UMA-Inverse weights from Hugging Face.
 
 Most users do **not** need to run this — the ``uma-inverse`` CLI
 auto-fetches the default checkpoint into ``~/.cache/uma-inverse/`` on its
@@ -9,7 +9,7 @@ inference time, or to populate a project-local ``checkpoints/`` directory).
 Usage:
     uv run python scripts/download_weights.py
     uv run python scripts/download_weights.py --force
-    uv run python scripts/download_weights.py --output checkpoints/uma-inverse-v2.ckpt
+    uv run python scripts/download_weights.py --output checkpoints/uma-inverse-1.ckpt
     uv run python scripts/download_weights.py --repo-id user/repo --filename ckpt.ckpt
 
 After download, you can pass ``--ckpt`` explicitly:

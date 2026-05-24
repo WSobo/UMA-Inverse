@@ -20,7 +20,7 @@ uv sync                        # installs the package + deps from uv.lock
 
 If you don't have uv, plain pip works too: `pip install -e .` (uses the same `pyproject.toml`, no lockfile guarantee).
 
-Trained weights live on [Hugging Face](https://huggingface.co/WSobo/UMA-Inverse_v2) and are **auto-fetched on first inference** into `~/.cache/uma-inverse/uma-inverse-v2.ckpt`. No separate setup step is required. To pre-fetch explicitly (e.g. for offline machines), run `uv run python scripts/download_weights.py`.
+Trained weights live on [Hugging Face](https://huggingface.co/WSobo/Uma-Inverse-1) and are **auto-fetched on first inference** into `~/.cache/uma-inverse/uma-inverse-1.ckpt`. No separate setup step is required. To pre-fetch explicitly (e.g. for offline machines), run `uv run python scripts/download_weights.py`.
 
 GPU is recommended (any CUDA-capable card with ≥8 GB; the v2 model fits comfortably on a single A5500). CPU inference works but is ~50× slower.
 
