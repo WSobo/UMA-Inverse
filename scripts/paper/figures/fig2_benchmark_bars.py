@@ -66,22 +66,17 @@ def main() -> None:
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
     splits = ("metal", "small_molecule", "nucleotide")
-    fig, axes = plt.subplots(1, 3, figsize=(13, 4), sharey=True)
+    fig, axes = plt.subplots(1, 3, figsize=(10, 4), sharey=True)
 
-    # Order: UMA-Inverse-1 (v3, primary), LigandMPNN, ProteinMPNN, UMA-v2 (supp.), UMA-v1 (supp.)
-    methods = ("UMA-Inverse-1", "LigandMPNN", "ProteinMPNN", "UMA-v2", "UMA-v1")
+    methods = ("UMA-Inverse-1", "LigandMPNN", "ProteinMPNN")
     colors = {
         "UMA-Inverse-1": "#2C5F8E",
         "LigandMPNN":    "#C13C3C",
         "ProteinMPNN":   "#888888",
-        "UMA-v2":        "#7CA9CD",
-        "UMA-v1":        "#B0CEDF",
     }
 
     for ax, split in zip(axes, splits):
         v3_meds = _load_pdb_medians(args.bench_dir / f"v3-ep23-test_{split}" / "per_pdb.csv")
-        v2_meds = _load_pdb_medians(args.bench_dir / f"v2-ep19-test_{split}" / "per_pdb.csv")
-        v1_meds = _load_pdb_medians(args.bench_dir / f"ep11-test_{split}" / "per_pdb.csv")
 
         def _mean_err(meds):
             if not meds:
@@ -89,11 +84,9 @@ def main() -> None:
             return float(np.mean(meds)), float(np.std(meds, ddof=0) / np.sqrt(len(meds)))
 
         v3_mean, v3_err = _mean_err(v3_meds)
-        v2_mean, v2_err = _mean_err(v2_meds)
-        v1_mean, v1_err = _mean_err(v1_meds)
 
-        values = [v3_mean, LIGANDMPNN_REF[split], PROTEINMPNN_REF[split], v2_mean, v1_mean]
-        errors = [v3_err, 0.0, 0.0, v2_err, v1_err]
+        values = [v3_mean, LIGANDMPNN_REF[split], PROTEINMPNN_REF[split]]
+        errors = [v3_err, 0.0, 0.0]
 
         x = np.arange(len(methods))
         bars = ax.bar(
@@ -107,13 +100,9 @@ def main() -> None:
                 ax.text(bar.get_x() + bar.get_width() / 2, val + 0.015,
                         f"{val:.3f}", ha="center", va="bottom", fontsize=8)
 
-        # Vertical separator between primary and supplemental bars
-        ax.axvline(2.5, color="#aaa", linestyle="--", linewidth=0.8, alpha=0.7)
-        ax.text(2.55, 0.02, "suppl.", fontsize=7, color="#aaa", va="bottom")
-
         ax.set_xticks(x)
         ax.set_xticklabels(methods, rotation=20, ha="right", fontsize=9)
-        n_label = f" (N={len(v3_meds)})" if v3_meds else f" (N={len(v2_meds)}, v2)"
+        n_label = f" (N={len(v3_meds)})" if v3_meds else ""
         ax.set_title(f"{split.replace('_', ' ').title()}{n_label}", fontsize=11)
         ax.set_ylim(0, 1.0)
         ax.grid(axis="y", alpha=0.3, linestyle="--", linewidth=0.5)
@@ -127,8 +116,7 @@ def main() -> None:
 
     fig.suptitle(
         "Interface sequence recovery, LigandMPNN-paper protocol\n"
-        "(10 designs/PDB, T=0.1, random decoding, 5Å sidechain cutoff) — "
-        "UMA-v2/v1 bars are supplemental",
+        "(10 designs/PDB, T=0.1, random decoding, 5Å sidechain cutoff)",
         fontsize=11, y=1.0,
     )
     plt.tight_layout()

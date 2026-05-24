@@ -140,15 +140,13 @@ def main() -> None:
         # 1:1 line
         lim = [min(min(uma_means), min(lig_means)) - 0.2,
                max(max(uma_means), max(lig_means)) + 0.2]
-        ax.plot(lim, lim, color="#888", linestyle="--", linewidth=0.7, alpha=0.7,
-                label="1:1")
+        ax.plot(lim, lim, color="#888", linestyle="--", linewidth=0.7, alpha=0.7)
         ax.set_xlabel("LigandMPNN designs: predicted affinity\n(Boltz-2; mean over 5 samples)",
                        fontsize=9)
         ax.set_ylabel("UMA-Inverse-1 designs: predicted affinity\n(Boltz-2; mean over 5 samples)",
                        fontsize=9)
         ax.set_xlim(*lim)
         ax.set_ylim(*lim)
-        ax.legend(fontsize=8)
         ax.grid(alpha=0.3, linestyle="--", linewidth=0.5)
         ax.set_axisbelow(True)
         ax.set_title("Predicted affinity (paired by PDB)", fontsize=10)

@@ -258,6 +258,19 @@ def main() -> None:
         distal_mask &= valid_mask
         pocket_mask &= valid_mask
 
+        # Use LigandMPNN native record as a length sanity check.  If the PDB-extracted
+        # native has a different length (insertion codes, multi-chain mismatch), pocket
+        # position indices are unreliable — zero out pocket_mask before any evaluation.
+        lig_native, lig_designs = _load_ligandmpnn_designs(pdb_id, args.ligandmpnn_dir)
+        if lig_native and len(lig_native) != len(native_seq):
+            logger.warning(
+                "%s: LigandMPNN native length (%d) != PDB-extracted native length (%d). "
+                "Likely insertion-coded residues or multi-chain mismatch. "
+                "Zeroing pocket_mask to avoid misleading pocket recovery statistics.",
+                pdb_id, len(lig_native), len(native_seq),
+            )
+            pocket_mask = np.zeros(len(native_seq), dtype=bool)
+
         # ── UMA designs ─────────────────────────────────────────────────────
         uma_designs = _load_uma_designs(pdb_id, args.uma_dir)
         if uma_designs:
@@ -292,15 +305,7 @@ def main() -> None:
             logger.info("UMA designs missing for %s", pdb_id)
 
         # ── LigandMPNN designs ──────────────────────────────────────────────
-        lig_native, lig_designs = _load_ligandmpnn_designs(pdb_id, args.ligandmpnn_dir)
         if lig_designs:
-            # Sanity: LigandMPNN's first record is the native -- verify it matches.
-            if lig_native and lig_native != native_seq:
-                logger.warning(
-                    "%s: LigandMPNN native record differs from PDB-extracted native "
-                    "(len %d vs %d) -- may indicate a chain ordering mismatch",
-                    pdb_id, len(lig_native), len(native_seq),
-                )
             for s_idx, seq in enumerate(lig_designs):
                 per_sample_rows.append({
                     "pdb_id": pdb_id, "kind": kind, "method": "ligandmpnn",

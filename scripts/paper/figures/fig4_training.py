@@ -86,18 +86,15 @@ def main() -> None:
             best_acc_idx = int(np.argmax(val_acc))
             ax_acc.plot(epochs[best_acc_idx], val_acc[best_acc_idx],
                         marker="*", color="#C13C3C", markersize=12, zorder=10)
-            ax_acc.text(epochs[best_acc_idx], val_acc[best_acc_idx] + 0.01,
-                        f"best {val_acc[best_acc_idx]:.3f}", color="#C13C3C",
-                        ha="center", fontsize=8)
 
             ax_loss.plot(epochs, val_loss, marker="o", color="#2C5F8E", linewidth=1.5,
                          markersize=4, markerfacecolor="white", markeredgewidth=1.2)
             best_loss_idx = int(np.argmin(val_loss))
             ax_loss.plot(epochs[best_loss_idx], val_loss[best_loss_idx],
                          marker="*", color="#C13C3C", markersize=12, zorder=10)
-            ax_loss.text(epochs[best_loss_idx], val_loss[best_loss_idx] - 0.05,
-                         f"best {val_loss[best_loss_idx]:.3f}", color="#C13C3C",
-                         ha="center", fontsize=8)
+
+            ax_acc.margins(y=0.18)
+            ax_loss.margins(y=0.18)
 
         ax_acc.set_title(title, fontsize=10)
         ax_acc.grid(True, alpha=0.3, linestyle="--", linewidth=0.5)

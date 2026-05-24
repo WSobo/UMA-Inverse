@@ -64,34 +64,24 @@ def main() -> None:
 
     for ax, split in zip(axes, splits):
         v3 = _load_pdb_medians(args.bench_dir / f"v3-ep23-test_{split}" / "per_pdb.csv")
-        v2 = _load_pdb_medians(args.bench_dir / f"v2-ep19-test_{split}" / "per_pdb.csv")
-        v1 = _load_pdb_medians(args.bench_dir / f"ep11-test_{split}" / "per_pdb.csv")
 
-        positions = [1, 2, 3]
-        violin_data = [v3 or [0.0], v2 or [0.0], v1 or [0.0]]
-        violin_colors = ["#2C5F8E", "#7CA9CD", "#B0CEDF"]
-        labels = ["UMA-Inverse-1", "UMA-v2\n(suppl.)", "UMA-v1\n(suppl.)"]
-
-        parts = ax.violinplot(violin_data, positions=positions, widths=0.7,
+        data = v3 or [0.0]
+        parts = ax.violinplot([data], positions=[1], widths=0.6,
                               showmeans=False, showmedians=False, showextrema=False)
-        for pc, color in zip(parts["bodies"], violin_colors):
-            pc.set_facecolor(color)
+        for pc in parts["bodies"]:
+            pc.set_facecolor("#2C5F8E")
             pc.set_edgecolor("black")
             pc.set_alpha(0.65)
             pc.set_linewidth(0.7)
 
-        # Box / median markers on top of the violin
-        for pos, data, color in zip(positions, violin_data, violin_colors):
-            if data == [0.0]:
-                continue
-            ax.boxplot([data], positions=[pos], widths=0.18, showfliers=False,
+        if data != [0.0]:
+            ax.boxplot([data], positions=[1], widths=0.14, showfliers=False,
                        patch_artist=True,
-                       boxprops=dict(facecolor="white", edgecolor=color, linewidth=1.2),
-                       medianprops=dict(color=color, linewidth=2.0),
+                       boxprops=dict(facecolor="white", edgecolor="#2C5F8E", linewidth=1.2),
+                       medianprops=dict(color="#2C5F8E", linewidth=2.0),
                        whiskerprops=dict(color="black", linewidth=0.7),
                        capprops=dict(color="black", linewidth=0.7))
 
-        # Reference lines for paper-reported numbers
         if split in LIGANDMPNN_REF:
             ax.axhline(LIGANDMPNN_REF[split], color="#C13C3C", linestyle="--",
                        linewidth=1.3, alpha=0.85, zorder=0,
@@ -100,21 +90,21 @@ def main() -> None:
                        linewidth=1.3, alpha=0.85, zorder=0,
                        label=f"ProteinMPNN (paper): {PROTEINMPNN_REF[split]:.3f}")
 
-        ax.set_xticks(positions)
-        ax.set_xticklabels(labels, fontsize=10)
-        ax.set_xlim(0.5, 3.5)
+        ax.set_xticks([1])
+        ax.set_xticklabels(["UMA-Inverse-1"], fontsize=10)
+        ax.set_xlim(0.4, 1.6)
         ax.set_ylim(0, 1.0)
         ax.grid(axis="y", alpha=0.25, linestyle="--", linewidth=0.5)
         ax.set_axisbelow(True)
         n_v3 = len(v3)
-        n_label = f" (N={n_v3})" if n_v3 else f" (v3 pending; N={len(v2)} from v2)"
+        n_label = f" (N={n_v3})" if n_v3 else ""
         ax.set_title(f"{split.replace('_', ' ').title()}{n_label}", fontsize=11)
         if split == splits[0]:
             ax.set_ylabel("Per-PDB interface recovery (median over 10 designs)", fontsize=10)
         ax.legend(loc="lower right", fontsize=8, framealpha=0.9)
 
     fig.suptitle(
-        "UMA-Inverse interface recovery distributions vs paper-reported references",
+        "UMA-Inverse-1 interface recovery distribution vs paper-reported references",
         fontsize=11, y=1.0,
     )
     plt.tight_layout()

@@ -93,21 +93,39 @@ per PDB on a ~400-PDB val sample, train a single
 ### 2.4 FILLED — distogram probe results (2026-05-15)
 
 - **Top-1: 0.266**  Top-3: 0.588  Neighbor (±1): 0.568  MAE: 3.69 Å  ECE: 0.025
-- **VERDICT: encoder_weak** (top-1 = 0.266, far below 0.60 threshold)
+- **VERDICT: encoder_weak on geometry** (top-1 = 0.266, far below 0.60 threshold)
 
 Interpretation:
 - top-3 (0.588) >> top-1 (0.266): the probe learns coarse distance ranges
-  but cannot discriminate precisely. ECE=0.025 means it is well-calibrated,
-  so this is not overconfidence — the encoder simply does not carry
-  fine-grained Cβ-Cβ geometry in Z_ij.
-- Combined with distal-KL outcome (UMA diverges 20× more from native than
-  LigandMPNN at >25 Å), the picture is: the encoder IS responding to the
-  ligand at distal positions (mechanism KL higher), but the responses are
-  noisy/incorrect because Z_ij lacks geometric grounding.
-- v4 implication (pre-committed): trunk rethink before features. Adding
-  AF3 pos-enc or AtomFlow features to a geometrically-blind trunk will
-  not fix this — the trunk needs a geometry supervision signal during
-  training (→ promote Stage 2 auxiliary heads to the front of v4).
+  but cannot discriminate precisely. ECE=0.025 means it is well-calibrated —
+  the encoder does not carry fine-grained Cβ-Cβ geometry in Z_ij.
+
+**Two KL analyses — important distinction (added 2026-05-24):**
+
+- **Mechanism KL** (conditioned vs. ligand-ablated): measures how much the
+  ligand changes the model's predictions at each residue. This is a POSITIVE
+  finding for UMA-Inverse — the encoder IS broadcasting ligand identity
+  globally. At 10–15 Å: UMA KL = 0.075 vs LigandMPNN 0.015 (5×). Signal
+  persists to >25 Å (UMA 0.040 vs LMPNN 0.013). This is the figure in the
+  preprint (§4.6 / PDF Figure 5).
+
+- **Outcome KL** (predicted vs. native): measures how much the model's
+  predictions diverge from the native sequence at distal positions. UMA
+  diverges 20× more from native than LigandMPNN at >25 Å. This is the
+  "noisy" interpretation — the model is responding to the ligand but the
+  response is often incorrect.
+
+**Combined picture:** The encoder signals ligand identity at distant positions
+(mechanism KL high) but the decoder cannot translate that signal into correct
+amino acid choices (outcome KL high = noisy predictions). This is a decoder
+access problem, not encoder silence. The encoder is geometrically weak on
+Cβ-Cβ (distogram top-1 = 0.266) but encoder_strong on ligand propagation.
+
+- v4 implication: **highest-priority fix is the decoder interface** — wire
+  Z_{i,ligand} directly into AR attention weights. Geometry supervision
+  (aux heads) is secondary but still important to improve precision of
+  the distal signal. Adding features to a decoder-bottlenecked system
+  will have limited effect until the readout is fixed.
 
 ---
 
@@ -150,10 +168,15 @@ is misleading. All headline numbers below are on the **20 shared PDBs** (apples-
   - On the shared PDB set, UMA matches or beats LigandMPNN (80% vs 75% PDB-level)
   - UMA has a genuine edge in ligand placement (0.81 vs 1.00 Å median ligand RMSD)
   - Cofold pass-rate condition from §3 is borderline met (PDB-level win by +5 pts)
-  - Distogram probe says encoder_weak, but practical outputs don't show it collapsing —
-    the model IS useful despite not encoding clean Cβ-Cβ geometry
-  - v4 goal: fix the geometry grounding (Stage 2 aux heads during training) while
-    keeping the architectural wins that are already working
+  - Distogram probe says encoder_weak on geometry, but mechanism KL analysis shows
+    the encoder IS propagating ligand identity globally (5× stronger at 10–15 Å vs
+    LigandMPNN) — the model has real architectural wins worth preserving
+  - The recovery gap is now attributed primarily to the decoder bottleneck (mean-pooled
+    ligand context) rather than encoder failure; fixing decoder readout is the highest-
+    priority v4 change
+  - v4 goal: fix decoder interface first (wire Z_{i,ligand} into AR attention), then
+    geometry grounding (Stage 2 aux heads), to convert the encoder's existing distal
+    signal into accurate sequence predictions
 
 ---
 
@@ -191,16 +214,25 @@ All cheap to compute via RDKit. Concern: pushes ligand_repr dim from 128
 toward 256 if we want to preserve per-feature signal — needs param-budget
 sizing (Stage 2 of cuts list below).
 
-### Stage 2 — Auxiliary heads on Z_ij (1 week, partially diagnostic first)
-Distogram + orientation + PAE-like heads, ~30 lines each, weight ~0.2.
+### Stage 2 — Decoder interface fix + auxiliary heads (1–2 weeks)
+
+**Highest-priority change (added 2026-05-24):** Wire residue–ligand pair
+features Z_{i,ligand} directly into the AR attention weights at each
+decoding step, as a pairwise bias (analogous to AlphaFold3). Currently
+these reach the decoder only as a mean-pooled vector, discarding position-
+specific signal the encoder has already computed. The mechanism KL analysis
+predicts this change will disproportionately improve UMA-Inverse's distal
+recovery relative to LigandMPNN.
+
+**Auxiliary geometry heads on Z_ij** (secondary, ~30 lines each, weight ~0.2):
+Distogram + orientation + PAE-like heads to sharpen geometric grounding.
 
 **Two-phase rollout:**
-1. *Diagnostic first:* The post-v3 distogram probe IS Stage 2A's first
-   head, run on a frozen trunk. If verdict is `encoder_strong`, the head
-   trained jointly during v4 will likely add nothing. If `encoder_partial`
-   or `encoder_weak`, joint training of the head SHOULD help (because the
-   geometry gradient flows into Z_ij).
-2. *Training-time:* Add to the v4 training loss with weight ~0.2.
+1. *Decoder fix first:* Implement pairwise AR bias before adding aux heads —
+   the decoder fix is architecturally independent and provides a clean
+   ablation baseline.
+2. *Training-time aux heads:* Add distogram head to v4 training loss with
+   weight ~0.2 after decoder fix is validated.
 
 ### Stage 3 — Boltz-pretrain + holo finetune (4–6 weeks)
 Promoted from "Stage 4" in the original v4 roadmap. ESM-IF precedent
