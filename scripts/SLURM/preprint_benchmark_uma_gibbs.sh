@@ -2,7 +2,7 @@
 #SBATCH --job-name=uma-gibbs
 #SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_out/benchmark_gibbs_%j.out
 #SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_err/benchmark_gibbs_%j.err
-#SBATCH --time=6:00:00
+#SBATCH --time=10:00:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
@@ -25,6 +25,7 @@
 # Output: outputs/benchmark/v3-gibbs-K5/gibbs_sweep.csv
 
 set -e
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 cd /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse
 
 uv run uma-inverse benchmark \
@@ -40,7 +41,7 @@ uv run uma-inverse benchmark \
     --no-skip-gibbs \
     --gibbs-iterations  0,1,2,3,5 \
     --samples-per-pdb   3 \
-    --max-total-nodes   5000 \
+    --max-total-nodes   650 \
     -v
 
 echo ">> Gibbs sweep complete."

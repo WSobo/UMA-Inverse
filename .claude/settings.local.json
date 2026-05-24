@@ -33,7 +33,11 @@
       "Bash(awk -F, 'NR>1 && $4!=\"\" {printf \"  ep%s train/acc=%.4f train/loss=%.4f\\\\n\", $1, $4, $7}' logs/csv/pairmixerinv-v3-stage3-nodes384-ddp8/version_0/metrics.csv)",
       "Bash(awk '{print $NF, $6, $7, $8}')",
       "Bash(bash -n scripts/SLURM/submit_post_v3_pipeline.sh)",
-      "Bash(bash scripts/SLURM/submit_post_v3_pipeline.sh --after 99999999 --dry-run)"
+      "Bash(bash scripts/SLURM/submit_post_v3_pipeline.sh --after 99999999 --dry-run)",
+      "Bash(awk -F',' 'NF>4 && $5!=\"\" {print \"ep\"$1, \"val/acc=\"$5, \"val/loss=\"$6}')",
+      "Bash(python3 *)",
+      "Bash(chmod +x *)",
+      "Bash(xargs ls -lt)"
     ]
   }
 }
