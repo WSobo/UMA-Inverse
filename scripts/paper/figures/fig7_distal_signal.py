@@ -1,20 +1,20 @@
-"""Figure 7: distal-confidence vs cofold-quality correlation, UMA vs LigandMPNN.
+"""Figure 7: distal-confidence vs cofold-quality correlation, UMA-Inverse-1 vs LigandMPNN.
 
 Operationalises Test 4 from `distal_signal_analysis.py` as a figure.
 
 Per-PDB distal confidence (1 - mean_pairwise_hamming_distal) on x;
 Boltz-2 cofold quality on y. Each row is a different quality metric;
-columns are method (UMA-v2 left, LigandMPNN right).
+columns are method (UMA-Inverse-1 left, LigandMPNN right).
 
-The asymmetry visible across both rows is the §3.4 finding: UMA's distal
-confidence tracks pocket-specific cofold confidence (ipTM); LigandMPNN's
+The asymmetry visible across both rows is the §3.4 finding: UMA-Inverse-1's
+distal confidence tracks pocket-specific cofold confidence (ipTM); LigandMPNN's
 distal confidence is essentially decoupled from ipTM, while still picking
 up the global-fold signal (pLDDT) that any sequence-design recovery
 correlates with.
 
 Source:
     outputs/preprint/pocket_fixed_summary.csv
-    outputs/preprint/cofold_metrics.csv
+    outputs/preprint/cofold_metrics_ext2.csv
 """
 from __future__ import annotations
 
@@ -144,7 +144,7 @@ def main() -> None:
     parser.add_argument(
         "--cofold",
         type=Path,
-        default=PROJECT_ROOT / "outputs" / "preprint" / "cofold_metrics.csv",
+        default=PROJECT_ROOT / "outputs" / "preprint" / "cofold_metrics_ext2.csv",
     )
     parser.add_argument(
         "--out-dir",
@@ -175,9 +175,9 @@ def main() -> None:
     # ── Restrict to small-molecule PDBs paired across both phases ──────────
     pdbs = sorted(
         p for p, d in pf_by.items()
-        if d.get("uma_v2", {}).get("kind") == "small_molecule"
+        if d.get("uma_v3", {}).get("kind") == "small_molecule"
         and "ligandmpnn" in d
-        and "uma_v2" in cf_by[p]
+        and "uma_v3" in cf_by[p]
         and "ligandmpnn" in cf_by[p]
     )
     if not pdbs:
@@ -186,7 +186,7 @@ def main() -> None:
     # ── Build per-method (conf, quality) vectors ───────────────────────────
     conf_by_method: dict[str, list[float]] = {
         m: [1.0 - float(pf_by[p][m]["mean_pairwise_hamming_distal"]) for p in pdbs]
-        for m in ("uma_v2", "ligandmpnn")
+        for m in ("uma_v3", "ligandmpnn")
     }
 
     # ── Plot grid: rows = metric, cols = method ────────────────────────────
@@ -195,7 +195,7 @@ def main() -> None:
 
     for row_idx, (field, ylabel) in enumerate(QUALITY_METRICS):
         for col_idx, (method, color, mlabel) in enumerate((
-            ("uma_v2",     UMA_COLOR, "UMA-v2"),
+            ("uma_v3",     UMA_COLOR, "UMA-Inverse-1"),
             ("ligandmpnn", LIG_COLOR, "LigandMPNN"),
         )):
             ax = axes[row_idx, col_idx]

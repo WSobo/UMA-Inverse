@@ -66,7 +66,7 @@ def main() -> None:
     parser.add_argument(
         "--cofold",
         type=Path,
-        default=PROJECT_ROOT / "outputs" / "preprint" / "cofold_metrics.csv",
+        default=PROJECT_ROOT / "outputs" / "preprint" / "cofold_metrics_ext2.csv",
     )
     args = parser.parse_args()
 
@@ -82,18 +82,18 @@ def main() -> None:
 
     sm_pdbs_pf = [
         p for p, d in pf_by.items()
-        if d.get("uma_v2", {}).get("kind") == "small_molecule" and "ligandmpnn" in d
+        if d.get("uma_v3", {}).get("kind") == "small_molecule" and "ligandmpnn" in d
     ]
     sm_pdbs_cf = [
         p for p in sm_pdbs_pf
-        if "uma_v2" in cf_by[p] and "ligandmpnn" in cf_by[p]
+        if "uma_v3" in cf_by[p] and "ligandmpnn" in cf_by[p]
     ]
 
     print(f"Small-mol paired (pocket-fixed):                  N = {len(sm_pdbs_pf)}")
     print(f"Small-mol paired (pocket-fixed AND cofold both):  N = {len(sm_pdbs_cf)}")
 
     # Test 1: per-PDB hamming correlation between methods
-    uma_h = [float(pf_by[p]["uma_v2"]["mean_pairwise_hamming_distal"]) for p in sm_pdbs_pf]
+    uma_h = [float(pf_by[p]["uma_v3"]["mean_pairwise_hamming_distal"]) for p in sm_pdbs_pf]
     lig_h = [float(pf_by[p]["ligandmpnn"]["mean_pairwise_hamming_distal"]) for p in sm_pdbs_pf]
     print("\n[Test 1] Per-PDB distal-hamming correlation between UMA and LigandMPNN:")
     r, p = pearsonr(uma_h, lig_h)
@@ -110,8 +110,8 @@ def main() -> None:
         aa_by[r["pdb_id"]][r["method"]][r["aa"]] = float(r["freq_distal"])
     correls = []
     for p in sm_pdbs_pf:
-        AAs = sorted(aa_by[p]["uma_v2"].keys())
-        u = [aa_by[p]["uma_v2"][a] for a in AAs]
+        AAs = sorted(aa_by[p]["uma_v3"].keys())
+        u = [aa_by[p]["uma_v3"][a] for a in AAs]
         lig = [aa_by[p]["ligandmpnn"][a] for a in AAs]
         if sum(u) > 0 and sum(lig) > 0:
             r, _ = pearsonr(u, lig)
@@ -123,9 +123,9 @@ def main() -> None:
     print("           different posterior width' picture.")
 
     # Test 3: pocket size vs diversity, per method
-    sizes = [int(pf_by[p]["uma_v2"]["n_pocket"]) for p in sm_pdbs_pf]
+    sizes = [int(pf_by[p]["uma_v3"]["n_pocket"]) for p in sm_pdbs_pf]
     print("\n[Test 3] Pocket size vs distal hamming (Pearson r):")
-    for label, h in (("UMA-v2     ", uma_h), ("LigandMPNN ", lig_h)):
+    for label, h in (("UMA-Inverse-1 ", uma_h), ("LigandMPNN    ", lig_h)):
         r, p = pearsonr(sizes, h)
         print(f"  {label}  r = {r:+.3f}  p = {p:.3g}")
     print("  Reading: pocket-residue count alone doesn't predict UMA confidence.")
@@ -140,7 +140,7 @@ def main() -> None:
         ("pocket_calpha_rmsd_best",     -1, "lower = better"),
         ("ligand_rmsd_best",            -1, "lower = better"),
     ]
-    for method in ("uma_v2", "ligandmpnn"):
+    for method in ("uma_v3", "ligandmpnn"):
         conf = [
             1.0 - float(pf_by[p][method]["mean_pairwise_hamming_distal"])
             for p in sm_pdbs_cf

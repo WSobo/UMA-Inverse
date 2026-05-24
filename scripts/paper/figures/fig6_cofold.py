@@ -54,11 +54,12 @@ def _violin_panel(ax, rows, field, ylabel, title):
 
     positions, labels, vals, colors = [], [], [], []
     for x, kind in enumerate(("small_molecule", "metal")):
-        for offset, method in enumerate(("uma_v2", "ligandmpnn")):
+        for offset, method in enumerate(("uma_v3", "ligandmpnn")):
             positions.append(x * 3 + offset)
-            labels.append(f"{method.replace('_', '-')}\n({kind})")
+            label = "UMA-Inverse-1" if method == "uma_v3" else "LigandMPNN"
+            labels.append(f"{label}\n({kind})")
             vals.append(data[(kind, method)] or [0])
-            colors.append("#2C5F8E" if method == "uma_v2" else "#C13C3C")
+            colors.append("#2C5F8E" if method == "uma_v3" else "#C13C3C")
     if not any(v != [0] for v in vals):
         ax.set_title(f"{title}\n(no cofold data yet)", fontsize=10)
         ax.set_ylabel(ylabel, fontsize=9)
@@ -89,7 +90,7 @@ def main() -> None:
     parser.add_argument(
         "--metrics",
         type=Path,
-        default=PROJECT_ROOT / "outputs" / "preprint" / "cofold_metrics.csv",
+        default=PROJECT_ROOT / "outputs" / "preprint" / "cofold_metrics_ext2.csv",
     )
     parser.add_argument(
         "--out-dir",
@@ -101,7 +102,7 @@ def main() -> None:
     if not args.metrics.exists():
         raise SystemExit(
             f"missing {args.metrics}. Run scripts/paper/cofold_metrics.py "
-            "after Phase B's Boltz-2 cofolds finish."
+            "after Boltz-2 cofolds finish (use cofold_metrics_ext2.csv for v3)."
         )
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -127,12 +128,12 @@ def main() -> None:
             continue
         by_pdb[r["pdb_id"]][r["method"]].append(v)
     pdbs_paired = [pid for pid, d in by_pdb.items()
-                   if "uma_v2" in d and "ligandmpnn" in d]
+                   if "uma_v3" in d and "ligandmpnn" in d]
     if not pdbs_paired:
-        ax.set_title("Predicted affinity (UMA vs LigandMPNN, paired by PDB)\n(no paired data yet)",
+        ax.set_title("Predicted affinity (UMA-Inverse-1 vs LigandMPNN, paired by PDB)\n(no paired data yet)",
                      fontsize=10)
     else:
-        uma_means = [np.mean(by_pdb[pid]["uma_v2"]) for pid in pdbs_paired]
+        uma_means = [np.mean(by_pdb[pid]["uma_v3"]) for pid in pdbs_paired]
         lig_means = [np.mean(by_pdb[pid]["ligandmpnn"]) for pid in pdbs_paired]
         ax.scatter(lig_means, uma_means, s=60, color="#444", edgecolor="black",
                    linewidth=0.7, alpha=0.85)
@@ -143,7 +144,7 @@ def main() -> None:
                 label="1:1")
         ax.set_xlabel("LigandMPNN designs: predicted affinity\n(Boltz-2; mean over 5 samples)",
                        fontsize=9)
-        ax.set_ylabel("UMA-v2 designs: predicted affinity\n(Boltz-2; mean over 5 samples)",
+        ax.set_ylabel("UMA-Inverse-1 designs: predicted affinity\n(Boltz-2; mean over 5 samples)",
                        fontsize=9)
         ax.set_xlim(*lim)
         ax.set_ylim(*lim)

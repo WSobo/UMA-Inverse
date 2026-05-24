@@ -39,3 +39,14 @@ logs/SLURM_err/*
 LigandMPNN/
 Struct2Seq-GNN/
 UMA-Fold/
+
+# Preprint (kept locally, not tracked in repo)
+docs/preprint*.tex
+docs/preprint*.pdf
+docs/preprint*.aux
+docs/preprint*.bbl
+docs/preprint*.blg
+docs/preprint*.log
+docs/preprint*.out
+docs/preprint_package/
+docs/uma_inverse_preprint.tar.gz

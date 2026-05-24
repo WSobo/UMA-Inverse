@@ -124,11 +124,11 @@ def main() -> None:
         by_pdb[r["pdb_id"]][r["method"]] = r
 
     paired_pdbs = [pid for pid, d in by_pdb.items()
-                   if "uma_v2" in d and "ligandmpnn" in d]
+                   if "uma_v3" in d and "ligandmpnn" in d]
     logger.info("paired PDBs (both methods present): %d / %d", len(paired_pdbs), len(by_pdb))
 
     lines: list[str] = []
-    lines.append("# Pocket-fixed redesign: UMA vs LigandMPNN")
+    lines.append("# Pocket-fixed redesign: UMA-Inverse-1 vs LigandMPNN")
     lines.append(f"# Paired PDBs: {len(paired_pdbs)} / {len(by_pdb)}")
     lines.append("")
 
@@ -141,13 +141,13 @@ def main() -> None:
         if split_filter is None:
             pids = paired_pdbs
         else:
-            pids = [pid for pid in paired_pdbs if by_pdb[pid]["uma_v2"]["kind"] == split_filter]
+            pids = [pid for pid in paired_pdbs if by_pdb[pid]["uma_v3"]["kind"] == split_filter]
         if not pids:
             continue
         lines.append(f"## Split: {split_name}  (N = {len(pids)} PDBs)")
         lines.append("")
         for metric, metric_label in METRICS:
-            uma_vals = np.array([by_pdb[pid]["uma_v2"][metric] for pid in pids])
+            uma_vals = np.array([by_pdb[pid]["uma_v3"][metric] for pid in pids])
             lig_vals = np.array([by_pdb[pid]["ligandmpnn"][metric] for pid in pids])
             valid = np.isfinite(uma_vals) & np.isfinite(lig_vals)
             uma_vals = uma_vals[valid]

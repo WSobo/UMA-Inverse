@@ -584,6 +584,7 @@ class UMAInverse(nn.Module):
         sequence: Tensor | None,
         residue_mask: Tensor,
         decoding_order: Tensor | None = None,
+        full_context: bool = False,
     ) -> Tensor:
         batch_size, residue_count = residue_mask.shape
         if sequence is None:
@@ -602,16 +603,21 @@ class UMAInverse(nn.Module):
         logits = self.ar_pair_to_attn(rr) / math.sqrt(float(self.pair_dim))
         logits = logits.permute(0, 3, 1, 2)
 
-        if decoding_order is None:
-            decoding_order = torch.arange(
-                residue_count, device=z.device
-            ).unsqueeze(0).expand(batch_size, -1)
+        if full_context:
+            # Gibbs mode: each position attends to all others (no causal mask).
+            diag = torch.eye(residue_count, dtype=torch.bool, device=z.device).unsqueeze(0)
+            valid = (~diag) & residue_mask[:, :, None].bool() & residue_mask[:, None, :].bool()
+        else:
+            if decoding_order is None:
+                decoding_order = torch.arange(
+                    residue_count, device=z.device
+                ).unsqueeze(0).expand(batch_size, -1)
 
-        decoding_order_i = decoding_order.unsqueeze(2)
-        decoding_order_j = decoding_order.unsqueeze(1)
-        causal = decoding_order_i > decoding_order_j
+            decoding_order_i = decoding_order.unsqueeze(2)
+            decoding_order_j = decoding_order.unsqueeze(1)
+            causal = decoding_order_i > decoding_order_j
 
-        valid = causal & residue_mask[:, :, None].bool() & residue_mask[:, None, :].bool()
+            valid = causal & residue_mask[:, :, None].bool() & residue_mask[:, None, :].bool()
         valid_h = valid.unsqueeze(1)  # [B, 1, L, L] → broadcasts over heads
 
         logits = logits.masked_fill(~valid_h, -1e4)

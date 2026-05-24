@@ -40,7 +40,7 @@ import numpy as np
 import torch
 
 from src.inference.constraints import DesignConstraints
-from src.inference.decoding import autoregressive_design
+from src.inference.decoding import autoregressive_design, gibbs_design
 from src.inference.session import InferenceSession
 from src.utils.io import ID_TO_AA
 
@@ -137,6 +137,10 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--limit", type=int, default=None,
                         help="Cap number of PDBs (for piloting on 1-2 first).")
+    parser.add_argument("--mode", choices=["ar", "gibbs"], default="ar",
+                        help="Sampling mode: 'ar' (sequential autoregressive) or 'gibbs' (parallel block Gibbs).")
+    parser.add_argument("--gibbs-iterations", type=int, default=5,
+                        help="Number of Gibbs refinement passes (only used when --mode gibbs).")
     parser.add_argument("--device", choices=["cuda", "cpu", "auto"], default="auto")
     args = parser.parse_args()
 
@@ -213,16 +217,27 @@ def main() -> None:
 
         # Sample K sequences.
         per_pdb_seed = args.seed + 100 * idx  # offset so each PDB has independent seeds
-        samples = autoregressive_design(
-            session=session,
-            ctx=ctx,
-            constraints=resolved,
-            num_samples=args.num_samples,
-            batch_size=args.batch_size,
-            temperature=args.temperature,
-            seed=per_pdb_seed,
-            decoding_order=args.decoding_order,
-        )
+        if args.mode == "gibbs":
+            samples = gibbs_design(
+                session=session,
+                ctx=ctx,
+                constraints=resolved,
+                num_samples=args.num_samples,
+                num_iterations=args.gibbs_iterations,
+                temperature=args.temperature,
+                seed=per_pdb_seed,
+            )
+        else:
+            samples = autoregressive_design(
+                session=session,
+                ctx=ctx,
+                constraints=resolved,
+                num_samples=args.num_samples,
+                batch_size=args.batch_size,
+                temperature=args.temperature,
+                seed=per_pdb_seed,
+                decoding_order=args.decoding_order,
+            )
 
         native = ctx.native_sequence.cpu()
         designable_mask_cpu = resolved.designable_mask.cpu()
@@ -315,7 +330,7 @@ def main() -> None:
         summary_rows.append({
             "pdb_id": pdb_id,
             "kind": kind,
-            "method": "uma_v2",
+            "method": "uma_v3",
             "n_residues": ctx.residue_count,
             "n_fixed": n_fixed,
             "n_designable": n_designable,
@@ -344,7 +359,7 @@ def main() -> None:
 
     # Top-level meta
     args.out_dir.joinpath("run_meta.json").write_text(json.dumps({
-        "method": "uma_v2",
+        "method": "uma_v3",
         "ckpt": str(args.ckpt),
         "ckpt_stem": args.ckpt.stem,
         "num_samples_per_pdb": args.num_samples,

@@ -1,6 +1,6 @@
 """Build Boltz-2 YAML inputs for the pocket-fixed cofold experiment.
 
-For each PDB x method x sample (where method in {uma_v2, ligandmpnn} and we
+For each PDB x method x sample (where method in {uma_v3, ligandmpnn} and we
 sample 5 of the 20 generated sequences with a fixed seed), build a Boltz-2
 input YAML at:
 
@@ -10,7 +10,7 @@ Then a single Boltz-2 invocation per method directory cofolds all 100 inputs
 in one model-load (much faster than 100 separate invocations).
 
 Output layout when complete:
-    outputs/preprint/boltz_inputs/cofold/uma_v2/         100 YAMLs
+    outputs/preprint/boltz_inputs/cofold/uma_v3/         100 YAMLs
     outputs/preprint/boltz_inputs/cofold/ligandmpnn/     100 YAMLs
 
 Inputs:
@@ -170,11 +170,10 @@ def main() -> None:
     parser.add_argument(
         "--uma-method-name",
         type=str,
-        default="uma_v2",
+        default="uma_v3",
         help=(
             "Method label for the UMA-Inverse outputs (used as the YAML "
-            "subdirectory name and the 'method' field in sampling_record.json). "
-            "Set to 'uma_v3' when building cofold inputs from v3 designs."
+            "subdirectory name and the 'method' field in sampling_record.json)."
         ),
     )
     parser.add_argument(
@@ -182,12 +181,18 @@ def main() -> None:
         action="store_true",
         help="Skip emitting LigandMPNN YAMLs (e.g., when re-using a prior cofold).",
     )
+    parser.add_argument(
+        "--skip-uma",
+        action="store_true",
+        help="Skip emitting UMA YAMLs (e.g., when building LigandMPNN-only cofold inputs).",
+    )
     args = parser.parse_args()
 
     UMA_METHOD = args.uma_method_name
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
-    (args.out_dir / UMA_METHOD).mkdir(exist_ok=True)
+    if not args.skip_uma:
+        (args.out_dir / UMA_METHOD).mkdir(exist_ok=True)
     if not args.skip_ligandmpnn:
         (args.out_dir / "ligandmpnn").mkdir(exist_ok=True)
 
@@ -265,7 +270,8 @@ def main() -> None:
                     "sample_idx": s_idx, "yaml": str(out_path),
                 })
 
-        _emit(UMA_METHOD, _load_uma_designs(pdb_id, args.uma_dir))
+        if not args.skip_uma:
+            _emit(UMA_METHOD, _load_uma_designs(pdb_id, args.uma_dir))
         if not args.skip_ligandmpnn:
             _emit("ligandmpnn", _load_ligandmpnn_designs(pdb_id, args.ligandmpnn_dir))
 
@@ -274,8 +280,9 @@ def main() -> None:
     record_path.write_text(json.dumps(sampling_record, indent=2))
     logger.info("wrote %s   (%d entries)", record_path, len(sampling_record))
 
-    print(f"\nUMA YAMLs ({UMA_METHOD}): {n_emitted[UMA_METHOD]:>3d}   "
-          f"(missing for {n_missing[UMA_METHOD]} PDBs)")
+    if not args.skip_uma:
+        print(f"\nUMA YAMLs ({UMA_METHOD}): {n_emitted[UMA_METHOD]:>3d}   "
+              f"(missing for {n_missing[UMA_METHOD]} PDBs)")
     if not args.skip_ligandmpnn:
         print(f"LigandMPNN YAMLs:        {n_emitted['ligandmpnn']:>3d}   "
               f"(missing for {n_missing['ligandmpnn']} PDBs)")

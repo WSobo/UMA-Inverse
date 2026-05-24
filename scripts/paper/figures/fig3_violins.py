@@ -1,12 +1,13 @@
 """Figure 3: per-PDB recovery violin plots.
 
-Two panels (metal, small_molecule). Two violins per panel: UMA-v2 and UMA-v1.
-LigandMPNN/ProteinMPNN paper numbers can't be added as violins (we don't have
-their per-PDB distributions), so they're shown as horizontal reference lines.
+Two panels (metal, small_molecule). Three violins per panel: UMA-Inverse-1 (v3,
+primary), UMA-v2 and UMA-v1 (supplemental). LigandMPNN/ProteinMPNN paper numbers
+shown as horizontal reference lines.
 
 Sources:
-    UMA-v2 per-PDB:  outputs/benchmark/interface_recovery/v2-ep19-test_<cls>/per_pdb.csv
-    UMA-v1 per-PDB:  outputs/benchmark/interface_recovery/ep11-test_<cls>/per_pdb.csv
+    UMA-Inverse-1 (v3): outputs/benchmark/interface_recovery/v3-ep23-test_<cls>/per_pdb.csv
+    UMA-v2:             outputs/benchmark/interface_recovery/v2-ep19-test_<cls>/per_pdb.csv
+    UMA-v1:             outputs/benchmark/interface_recovery/ep11-test_<cls>/per_pdb.csv
 
 Output:
     outputs/preprint/figures/fig3_violins.{pdf,png}
@@ -62,13 +63,14 @@ def main() -> None:
     fig, axes = plt.subplots(1, 2, figsize=(9, 4.5), sharey=True)
 
     for ax, split in zip(axes, splits):
+        v3 = _load_pdb_medians(args.bench_dir / f"v3-ep23-test_{split}" / "per_pdb.csv")
         v2 = _load_pdb_medians(args.bench_dir / f"v2-ep19-test_{split}" / "per_pdb.csv")
         v1 = _load_pdb_medians(args.bench_dir / f"ep11-test_{split}" / "per_pdb.csv")
 
-        positions = [1, 2]
-        violin_data = [v2, v1]
-        violin_colors = ["#2C5F8E", "#7CA9CD"]
-        labels = ["UMA-v2", "UMA-v1"]
+        positions = [1, 2, 3]
+        violin_data = [v3 or [0.0], v2 or [0.0], v1 or [0.0]]
+        violin_colors = ["#2C5F8E", "#7CA9CD", "#B0CEDF"]
+        labels = ["UMA-Inverse-1", "UMA-v2\n(suppl.)", "UMA-v1\n(suppl.)"]
 
         parts = ax.violinplot(violin_data, positions=positions, widths=0.7,
                               showmeans=False, showmedians=False, showextrema=False)
@@ -80,7 +82,7 @@ def main() -> None:
 
         # Box / median markers on top of the violin
         for pos, data, color in zip(positions, violin_data, violin_colors):
-            if not data:
+            if data == [0.0]:
                 continue
             ax.boxplot([data], positions=[pos], widths=0.18, showfliers=False,
                        patch_artist=True,
@@ -100,11 +102,12 @@ def main() -> None:
 
         ax.set_xticks(positions)
         ax.set_xticklabels(labels, fontsize=10)
-        ax.set_xlim(0.5, 2.5)
+        ax.set_xlim(0.5, 3.5)
         ax.set_ylim(0, 1.0)
         ax.grid(axis="y", alpha=0.25, linestyle="--", linewidth=0.5)
         ax.set_axisbelow(True)
-        n_label = f" (N={len(v2)})"
+        n_v3 = len(v3)
+        n_label = f" (N={n_v3})" if n_v3 else f" (v3 pending; N={len(v2)} from v2)"
         ax.set_title(f"{split.replace('_', ' ').title()}{n_label}", fontsize=11)
         if split == splits[0]:
             ax.set_ylabel("Per-PDB interface recovery (median over 10 designs)", fontsize=10)

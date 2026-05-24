@@ -18,8 +18,11 @@
 set -e
 cd /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse
 
+IFACE_CONFIG="${IFACE_CONFIG:-configs/config.yaml}"
+
 echo ">> iface-recovery config:"
 echo "     ckpt         = $IFACE_CKPT"
+echo "     config       = $IFACE_CONFIG"
 echo "     val json     = $IFACE_VAL_JSON"
 echo "     pdb dir      = $IFACE_PDB_DIR"
 echo "     run name     = $IFACE_RUN_NAME"
@@ -29,6 +32,7 @@ echo "     cutoff Å     = $IFACE_CUTOFF"
 
 uv run python scripts/benchmark_interface_recovery.py \
     --ckpt "$IFACE_CKPT" \
+    --config "$IFACE_CONFIG" \
     --val-json "$IFACE_VAL_JSON" \
     --pdb-dir "$IFACE_PDB_DIR" \
     --run-name "$IFACE_RUN_NAME" \

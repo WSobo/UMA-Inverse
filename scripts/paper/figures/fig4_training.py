@@ -4,9 +4,9 @@ Six panels (3 stages × 2 metrics: val_acc, val_loss). Read from the
 PyTorch-Lightning CSVLogger metrics CSVs.
 
 Sources:
-    Stage 1: logs/csv/pairmixerinv-v2-stage1-nodes64/version_3/metrics.csv
-    Stage 2: logs/csv/pairmixerinv-v2-stage2-nodes128-ddp4/version_1/metrics.csv
-    Stage 3: logs/csv/pairmixerinv-v2-stage3-nodes384-ddp8/version_0/metrics.csv
+    Stage 1: logs/csv/pairmixerinv-v3-stage1-nodes64/version_3/metrics.csv
+    Stage 2: logs/csv/pairmixerinv-v3-stage2-nodes128-ddp4/version_1/metrics.csv
+    Stage 3: logs/csv/pairmixerinv-v3-stage3-nodes384-ddp8/version_0/metrics.csv
 
 (version numbers reflect re-runs after the EarlyStopping fix during training.)
 """
@@ -24,8 +24,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 STAGES = (
-    ("stage1-nodes64",          "version_3", "Stage 1 — single A5500 (max nodes 64)",        15),
-    ("stage2-nodes128-ddp4",    "version_1", "Stage 2 — 4× A5500 DDP (max nodes 128)",       25),
+    ("stage1-nodes64",          "version_0", "Stage 1 — single A5500 (max nodes 64)",        15),
+    ("stage2-nodes128-ddp4",    "version_0", "Stage 2 — 4× A5500 DDP (max nodes 128)",       25),
     ("stage3-nodes384-ddp8",    "version_0", "Stage 3 — 8× A5500 DDP (max nodes 384)",       30),
 )
 
@@ -75,7 +75,7 @@ def main() -> None:
     fig, axes = plt.subplots(2, 3, figsize=(11, 6), sharex=False)
 
     for col, (stage_name, version, title, max_epochs) in enumerate(STAGES):
-        metrics_csv = (args.logs_dir / f"pairmixerinv-v2-{stage_name}" / version / "metrics.csv")
+        metrics_csv = (args.logs_dir / f"pairmixerinv-v3-{stage_name}" / version / "metrics.csv")
         epochs, val_acc, val_loss = _load_val_curve(metrics_csv)
         ax_acc = axes[0, col]
         ax_loss = axes[1, col]
@@ -114,7 +114,7 @@ def main() -> None:
             ax_loss.set_ylabel("val loss", fontsize=10)
 
     fig.suptitle(
-        "v2 3-stage curriculum: val accuracy and val loss per epoch (red star = best per stage)",
+        "v3 3-stage curriculum: val accuracy and val loss per epoch (red star = best per stage)",
         fontsize=11, y=1.0,
     )
     plt.tight_layout()
