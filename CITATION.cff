@@ -4,13 +4,14 @@ title: "UMA-Inverse: Dense Pair-Wise Attention for Ligand-Conditioned Protein Se
 type: software
 authors:
   - family-names: Sobolewski
-    given-names: Wojciech
+    given-names: William
+    name-particle: Charles
     email: wsobolew@ucsc.edu
     affiliation: "University of California, Santa Cruz"
     orcid: "https://orcid.org/0009-0006-3890-4808"
 license: MIT
 repository-code: "https://github.com/WSobo/UMA-Inverse"
-url: "https://huggingface.co/WSobo/UMA-Inverse_v2"
+url: "https://huggingface.co/WSobo/UMA-Inverse_1"
 keywords:
   - protein-design
   - inverse-folding
@@ -23,7 +24,7 @@ preferred-citation:
   title: "UMA-Inverse: Dense Pair-Wise Attention for Ligand-Conditioned Protein Sequence Design"
   authors:
     - family-names: Sobolewski
-      given-names: Wojciech
+      given-names: William
       email: wsobolew@ucsc.edu
       affiliation: "University of California, Santa Cruz"
   year: 2026
