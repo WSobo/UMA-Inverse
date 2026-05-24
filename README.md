@@ -131,6 +131,8 @@ Writes `scores_<pdb>.csv` (per-position log-likelihoods) and `scores_<pdb>.json`
 - `--ligand-cutoff` — Å cutoff for ligand-proximal scoring (default 8.0).
 - `--max-total-nodes` — cap residues+ligand atoms (overrides config; useful for OOM-tight GPUs).
 - `--save-probs` — also dump the full `[N, L, 21]` probability tensor as `.npz`.
+- `--write-ranked` / `--no-ranked` — write (or suppress) the dedup'd `ranked.csv` output.
+- `--include-native` / `--no-native` — include (or suppress) the native sequence as the first FASTA record.
 - `--device {cuda,cpu,auto}` — defaults to auto.
 - `-v` / `-vv` — INFO / DEBUG logging.
 

@@ -152,7 +152,7 @@ code), negative numbers for unusual PDBs, spaces or commas as separators.
 | `--run-name NAME` | stem+timestamp | Subdirectory name. |
 | `--suffix TEXT` | empty | Appended to output file basenames. |
 | `--save-probs` | off | Also dump `probs/<pdb>.npz` with full `[N, L, 21]` distribution. |
-| `--ranked / --no-ranked` | ranked | Write dedup'd `ranked.csv`. |
+| `--write-ranked / --no-ranked` | ranked | Write dedup'd `ranked.csv`. |
 | `--include-native / --no-native` | include | First FASTA record = native sequence. |
 
 **Batch control**
