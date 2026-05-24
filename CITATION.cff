@@ -6,8 +6,8 @@ authors:
   - family-names: Sobolewski
     given-names: Wojciech
     email: wsobolew@ucsc.edu
-    affiliation: "Yeh Lab, University of California, Santa Cruz"
-    orcid: "https://orcid.org/0000-0000-0000-0000"  # TODO: replace with real ORCID
+    affiliation: "University of California, Santa Cruz"
+    orcid: "https://orcid.org/0009-0006-3890-4808"
 license: MIT
 repository-code: "https://github.com/WSobo/UMA-Inverse"
 url: "https://huggingface.co/WSobo/UMA-Inverse_v2"
@@ -25,7 +25,7 @@ preferred-citation:
     - family-names: Sobolewski
       given-names: Wojciech
       email: wsobolew@ucsc.edu
-      affiliation: "Yeh Lab, University of California, Santa Cruz"
+      affiliation: "University of California, Santa Cruz"
   year: 2026
   journal: "bioRxiv"
   doi: "TBD"  # populate after bioRxiv submission
