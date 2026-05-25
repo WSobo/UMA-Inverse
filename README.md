@@ -148,7 +148,7 @@ Standard interface-recovery benchmark (LigandMPNN test splits, 10 designs per PD
 
 | Split | UMA-Inverse-1 | LigandMPNN | ProteinMPNN |
 |---|---:|---:|---:|
-| Metal | 0.486 | 0.775 | 0.406 |
+| Metal | 0.500 | 0.775 | 0.406 |
 | Small molecule | 0.545 | 0.633 | 0.505 |
 
 The preprint (bioRxiv, link added on submission) characterizes a regime — **pocket-fixed redesign** — where UMA-Inverse's dense attention shows a structural advantage that local KNN message-passing does not capture.
