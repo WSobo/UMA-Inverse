@@ -37,7 +37,17 @@
       "Bash(awk -F',' 'NF>4 && $5!=\"\" {print \"ep\"$1, \"val/acc=\"$5, \"val/loss=\"$6}')",
       "Bash(python3 *)",
       "Bash(chmod +x *)",
-      "Bash(xargs ls -lt)"
+      "Bash(xargs ls -lt)",
+      "Bash(echo \"\\(exit $?\\)\")",
+      "Bash(diff references.bib private/references.bib)",
+      "Bash(bash compile.sh)",
+      "Bash(tar czf *)",
+      "Bash(tar tzf *)",
+      "Bash(grep -E \"preprint.\\(tex|pdf\\)$\")",
+      "Bash(pdflatex -interaction=nonstopmode preprint.tex)",
+      "Bash(bibtex preprint *)",
+      "Bash(pdfinfo preprint.pdf)",
+      "Bash(echo \"DONE — pages: $\\(pdfinfo preprint.pdf)"
     ]
   }
 }

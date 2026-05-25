@@ -9,7 +9,7 @@ description = "Ligand-conditioned protein inverse folding via PairMixer dense pa
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
-    {name = "Wojciech Sobolewski", email = "wsobolew@ucsc.edu"},
+    {name = "William Sobolewski", email = "wsobolew@ucsc.edu"},
 ]
 keywords = [
     "protein-design",
