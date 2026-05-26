@@ -348,6 +348,12 @@ class UMAInverse(nn.Module):
         # Avoids ligand signal being diluted (ligand atoms are ~8% of a typical mean pool).
         self.ctx_proj = nn.Linear(2 * pair_dim, pair_dim)
 
+        # v4 decoder fix: learned attention over ligand atoms using z[i, ℓ] as logit
+        # source. Replaces mean-pool of the residue-ligand block so each residue
+        # attends to ligand atoms in a position-specific way rather than receiving
+        # the same average regardless of distance or chemical context.
+        self.lig_ctx_attn = nn.Linear(pair_dim, 1, bias=False)
+
         # Multi-head AR attention: pair slot (i,j) → per-head attention logit
         # (previously a single scalar score — too narrow for teacher forcing to leak
         # useful identity information, causing the 1-batch overfit to plateau).
@@ -566,13 +572,22 @@ class UMAInverse(nn.Module):
         rr_w = pair_mask[:, :residue_count, :residue_count].to(dtype=z.dtype)
         rr_ctx = (rr * rr_w.unsqueeze(-1)).sum(dim=2) / rr_w.sum(dim=2, keepdim=True).clamp_min(1.0)
 
-        # Residue-ligand context: how each residue specifically relates to ligand atoms.
-        # Kept separate so binding-site residues get a distinct, undiluted ligand signal.
+        # Residue-ligand context: attention-weighted readout over ligand atoms using
+        # z[i, ℓ] as logit source (v4 decoder fix). Each residue i attends to ligand
+        # atoms with weights derived from the pair tensor, so distal residues whose
+        # z[i, ℓ] encodes specific ligand geometry receive position-specific signal
+        # rather than the same mean-pooled summary as pocket residues.
         n_total = z.shape[2]
         if n_total > residue_count:
-            rl = z[:, :residue_count, residue_count:, :]
-            rl_w = pair_mask[:, :residue_count, residue_count:].to(dtype=z.dtype)
-            rl_ctx = (rl * rl_w.unsqueeze(-1)).sum(dim=2) / rl_w.sum(dim=2, keepdim=True).clamp_min(1.0)
+            rl = z[:, :residue_count, residue_count:, :]          # [B, L, M, pair_dim]
+            rl_w = pair_mask[:, :residue_count, residue_count:]    # [B, L, M] bool
+            logits = self.lig_ctx_attn(rl).squeeze(-1)             # [B, L, M]
+            logits = logits / math.sqrt(float(self.pair_dim))
+            logits = logits.masked_fill(~rl_w.bool(), -1e4)
+            attn_w = torch.softmax(logits, dim=-1)                 # [B, L, M]
+            attn_w = attn_w * rl_w.to(dtype=attn_w.dtype)
+            attn_w = attn_w / attn_w.sum(dim=-1, keepdim=True).clamp_min(1e-6)
+            rl_ctx = torch.einsum("blm,blmd->bld", attn_w, rl)    # [B, L, pair_dim]
         else:
             rl_ctx = torch.zeros_like(rr_ctx)
 

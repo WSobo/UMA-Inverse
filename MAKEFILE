@@ -141,19 +141,19 @@ benchmark:
 # ==============================================================================
 .PHONY: test
 test:
-	$(SRUN_CPU) bash -c 'cd $(CURDIR) && uv run python -m pytest tests/ -v --tb=short'
+	$(SRUN_CPU) bash -c 'cd $(CURDIR) && uv run --extra dev python -m pytest tests/ -v --tb=short'
 
 .PHONY: test-fast
 test-fast:
-	$(SRUN_CPU) bash -c 'cd $(CURDIR) && uv run python -m pytest tests/ -v --tb=short -x'
+	$(SRUN_CPU) bash -c 'cd $(CURDIR) && uv run --extra dev python -m pytest tests/ -v --tb=short -x'
 
 .PHONY: lint
 lint:
-	$(SRUN_CPU) bash -c 'cd $(CURDIR) && uv run ruff check src/ scripts/ tests/'
+	$(SRUN_CPU) bash -c 'cd $(CURDIR) && uv run --extra dev ruff check src/ scripts/ tests/'
 
 .PHONY: lint-fix
 lint-fix:
-	$(SRUN_CPU) bash -c 'cd $(CURDIR) && uv run ruff check --fix src/ scripts/ tests/'
+	$(SRUN_CPU) bash -c 'cd $(CURDIR) && uv run --extra dev ruff check --fix src/ scripts/ tests/'
 
 
 # ==============================================================================
