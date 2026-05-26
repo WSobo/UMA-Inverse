@@ -23,6 +23,14 @@ SRUN_GPU := srun \
 	--cpus-per-task=8 \
 	--time=01:00:00
 
+# ── SLURM: A100 interactive allocation (v4 training target) ────────────────────
+SRUN_A100 := srun \
+	--partition=gpu \
+	--gres=gpu:A100:1 \
+	--mem=40G \
+	--cpus-per-task=8 \
+	--time=01:00:00
+
 # ── SLURM: CPU-only allocation (for lightweight jobs like pytest/lint) ─────────
 SRUN_CPU := srun \
 	--partition=medium \
@@ -97,6 +105,16 @@ pilot-384:
 .PHONY: pilot-all
 pilot-all:
 	sbatch scripts/SLURM/02_pilot_run.sh
+
+# v4 pilot — A100 interactive (single-batch overfit sanity check)
+.PHONY: pilot-v4
+pilot-v4:
+	$(SRUN_A100) bash -c 'cd $(CURDIR) && uv run python scripts/pilot_run.py'
+
+# v4 full pilot — all 3 stages, sbatch on A100
+.PHONY: pilot-v4-all
+pilot-v4-all:
+	sbatch scripts/SLURM/02_pilot_v4.sh
 
 
 # ==============================================================================
