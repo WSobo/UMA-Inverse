@@ -1,4 +1,4 @@
-project_name: UMA-Inverse
+project_name: Uma-Inverse
 run_name: pairmixerinv-v2
 seed: 42
 
@@ -31,8 +31,8 @@ training:
   coord_noise_std: 0.0
 
 wandb:
-  enabled: false   # set true to log runs; mode: offline avoids network req on HPC
-  mode: offline
+  enabled: false   # override with ++wandb.enabled=true in private SLURM scripts
+  mode: online
 
 model:
   residue_input_dim: 6

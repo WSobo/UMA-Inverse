@@ -15,7 +15,7 @@
 set -e
 cd /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2
 
-export WANDB_MODE="offline"
+export WANDB_API_KEY="${WANDB_API_KEY:?WANDB_API_KEY not set — add it to ~/.bashrc}"
 
 # v4 STAGE 2 DDP2 — 2×A100, max_total_nodes=128. bsz=8/rank gives effective
 # batch=16, matching v3 Stage 2 (4×A5500 bsz=4/rank=16). A100 VRAM (~40 GB)
@@ -25,6 +25,7 @@ export WANDB_MODE="offline"
 echo ">> [v4 STAGE 2 DDP2] 25 epochs at max_total_nodes=128, bsz=8/rank, devices=2 (A100)"
 srun uv run python scripts/train.py \
     run_name="pairmixerinv-v4-stage2-nodes128-ddp2" \
+    ++wandb.enabled=true \
     ++trainer.max_epochs=25 \
     ++data.max_total_nodes=128 \
     ++data.batch_size=8 \

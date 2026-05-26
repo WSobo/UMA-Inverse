@@ -15,7 +15,7 @@
 set -e
 cd /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2
 
-export WANDB_MODE="offline"
+export WANDB_API_KEY="${WANDB_API_KEY:?WANDB_API_KEY not set — add it to ~/.bashrc}"
 
 # v4 STAGE 3 DDP4 — 4×A100, max_total_nodes=384. bsz=4/rank gives effective
 # batch=16, matching v3 Stage 3 (8×A5500 bsz=2/rank=16). Gradient checkpointing
@@ -25,6 +25,7 @@ export WANDB_MODE="offline"
 echo ">> [v4 STAGE 3 DDP4] 30 epochs at max_total_nodes=384, bsz=4/rank, devices=4 (A100)"
 srun uv run python scripts/train.py \
     run_name="pairmixerinv-v4-stage3-nodes384-ddp4" \
+    ++wandb.enabled=true \
     ++trainer.max_epochs=30 \
     ++data.max_total_nodes=384 \
     ++data.batch_size=4 \

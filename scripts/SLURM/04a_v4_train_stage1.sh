@@ -14,7 +14,7 @@
 set -e
 cd /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2
 
-export WANDB_MODE="offline"
+export WANDB_API_KEY="${WANDB_API_KEY:?WANDB_API_KEY not set — add it to ~/.bashrc}"
 
 # v4 STAGE 1 — single A100, max_total_nodes=64. Identical hyperparams to v3
 # Stage 1 (15 epochs, bsz=8, warmup=1k, T_max=280k, all v3 feature flags ON).
@@ -30,6 +30,7 @@ export WANDB_MODE="offline"
 echo ">> [v4 STAGE 1] 15 epochs at max_total_nodes=64, bsz=8, all v3 flags ON (A100)"
 uv run python scripts/train.py \
     run_name="pairmixerinv-v4-stage1-nodes64" \
+    ++wandb.enabled=true \
     ++trainer.max_epochs=15 \
     ++data.max_total_nodes=64 \
     ++data.batch_size=8 \
