@@ -113,13 +113,14 @@ class UMAInverseLightningModule(pl.LightningModule):
         loss = metrics["loss"]
         acc  = metrics["acc"]
 
-        self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=True)
-        self.log("train/acc",  acc,  on_step=True, on_epoch=True, prog_bar=True)
+        self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log("train/acc",  acc,  on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
         self.log(
             "train/lr",
             self.optimizers().param_groups[0]["lr"],
             on_step=True,
             prog_bar=False,
+            sync_dist=False,
         )
         return loss
 
@@ -129,14 +130,14 @@ class UMAInverseLightningModule(pl.LightningModule):
             for p in self.model.parameters()
             if p.grad is not None
         ) ** 0.5
-        self.log("train/grad_norm", total_norm, on_step=True, prog_bar=False)
+        self.log("train/grad_norm", total_norm, on_step=True, prog_bar=False, sync_dist=True)
 
     # ── Validation step ───────────────────────────────────────────────────────
 
     def validation_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> None:
         out = self._compute_loss_and_metrics(batch)
-        self.log("val/loss", out["loss"], prog_bar=True, sync_dist=False)
-        self.log("val/acc",  out["acc"],  prog_bar=True, sync_dist=False)
+        self.log("val/loss", out["loss"], prog_bar=True, sync_dist=True)
+        self.log("val/acc",  out["acc"],  prog_bar=True, sync_dist=True)
 
     # ── Optimiser + scheduler ─────────────────────────────────────────────────
 

@@ -43,7 +43,10 @@ class SaveLastEveryEpoch(Callback):
         self.last_path = last_path
 
     def on_validation_epoch_end(self, trainer, pl_module):
-        if not trainer.is_global_zero or trainer.sanity_checking:
+        # Must run on ALL ranks: trainer.save_checkpoint() ends in a collective
+        # barrier (PL guards the actual file write to rank 0 internally). A
+        # rank-0-only guard here skips the barrier on other ranks → NCCL deadlock.
+        if trainer.sanity_checking:
             return
         trainer.save_checkpoint(self.last_path)
 

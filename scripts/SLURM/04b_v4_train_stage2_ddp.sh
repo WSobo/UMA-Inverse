@@ -22,6 +22,12 @@ export WANDB_API_KEY="${WANDB_API_KEY:?WANDB_API_KEY not set — add it to ~/.ba
 # comfortably handles bsz=8 at nodes=128 without gradient checkpointing.
 # Same schedule as v3 Stage 2 (25 epochs, warmup=1k, T_max=230k).
 
+STAGE1_DIR=checkpoints/pairmixerinv-v4-stage1-nodes64
+STAGE1_BEST=$(ls "${STAGE1_DIR}"/uma-inverse-*-*.ckpt 2>/dev/null \
+    | awk -F'-' '{print $NF, $0}' | sort -n | head -1 | cut -d' ' -f2-)
+STAGE1_CKPT="${STAGE1_BEST:-${STAGE1_DIR}/last.ckpt}"
+echo ">> Stage 2 warm-starting from: ${STAGE1_CKPT}"
+
 echo ">> [v4 STAGE 2 DDP2] 25 epochs at max_total_nodes=128, bsz=8/rank, devices=2 (A100)"
 srun uv run python scripts/train.py \
     run_name="pairmixerinv-v4-stage2-nodes128-ddp2" \
@@ -34,7 +40,7 @@ srun uv run python scripts/train.py \
     ++training.devices=2 \
     ++training.warmup_steps=1000 \
     ++training.T_max=230000 \
-    ++trainer.init_from_checkpoint="checkpoints/pairmixerinv-v4-stage1-nodes64/last.ckpt" \
+    ++trainer.init_from_checkpoint="${STAGE1_CKPT}" \
     ++data.pair_distance_atoms=backbone_full_25 \
     ++data.pair_distance_atoms_ligand=backbone_full \
     ++data.ligand_featurizer=ligandmpnn_atomic \
