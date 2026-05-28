@@ -354,6 +354,22 @@ class UMAInverse(nn.Module):
         # the same average regardless of distance or chemical context.
         self.lig_ctx_attn = nn.Linear(pair_dim, 1, bias=False)
 
+        # v5: rich per-atom ligand chemistry features (hybridization, formal
+        # charge, H-bond donor/acceptor, aromaticity, ring, degree — 22 dims).
+        # Additive to the existing element embedding so existing signal is
+        # preserved when loading v4 checkpoints with strict=False.
+        self.ligand_rich_features = bool(config.get("ligand_rich_features", False))
+        if self.ligand_rich_features:
+            self.rich_feat_proj = nn.Linear(22, node_dim)
+
+        # v5: covalent bond topology injected into the [M,M] pair block.
+        # Embedding over 5 bond types (0=none/pad, 1=single, 2=double,
+        # 3=triple, 4=aromatic); padding_idx=0 → zero vector for non-bonded
+        # and padded atom pairs.
+        self.ligand_bond_topology = bool(config.get("ligand_bond_topology", False))
+        if self.ligand_bond_topology:
+            self.bond_type_emb = nn.Embedding(5, pair_dim, padding_idx=0)
+
         # Multi-head AR attention: pair slot (i,j) → per-head attention logit
         # (previously a single scalar score — too narrow for teacher forcing to leak
         # useful identity information, causing the 1-batch overfit to plateau).
@@ -389,6 +405,7 @@ class UMAInverse(nn.Module):
         residue_count: int,
         residue_backbone_coords: Tensor | None = None,
         residue_ligand_frame_angles: Tensor | None = None,
+        ligand_bond_types: Tensor | None = None,
     ) -> Tensor:
         node_i = self.pair_i(node_repr).unsqueeze(2)
         node_j = self.pair_j(node_repr).unsqueeze(1)
@@ -564,6 +581,21 @@ class UMAInverse(nn.Module):
         relpos = self.relpos_emb(rel).unsqueeze(0).to(node_repr.dtype)  # [1, N, N, pair_dim]
 
         z = node_i + node_j + rbf + relpos
+
+        # v5: add bond-type embedding to the [M,M] ligand-ligand subblock.
+        # padding_idx=0 ensures non-bonded and padded pairs contribute zero.
+        if self.ligand_bond_topology and ligand_bond_types is not None:
+            ligand_count = coords.shape[1] - residue_count
+            if ligand_count > 0:
+                bond_embed = self.bond_type_emb(
+                    ligand_bond_types.long().to(node_repr.device)
+                )  # [B, M, M, pair_dim]
+                if not rbf_cloned:
+                    z = z.clone()
+                z[:, residue_count:, residue_count:, :] = (
+                    z[:, residue_count:, residue_count:, :] + bond_embed.to(z.dtype)
+                )
+
         return z * pair_mask.unsqueeze(-1).to(dtype=z.dtype)
 
     def _ligand_aware_context(self, z: Tensor, pair_mask: Tensor, residue_count: int) -> Tensor:
@@ -702,6 +734,12 @@ class UMAInverse(nn.Module):
         else:  # "atomic_number_embedding" or "ligandmpnn_atomic"
             ligand_repr = self.ligand_in(batch["ligand_atomic_numbers"])
 
+        # v5: additive rich chemistry features (hybridization, charge, etc.)
+        if self.ligand_rich_features and "ligand_rich_features" in batch:
+            ligand_repr = ligand_repr + self.rich_feat_proj(
+                batch["ligand_rich_features"].to(ligand_repr.dtype)
+            )
+
         # v3 phase 3 — additive node-level enrichment of ligand embeddings
         # with K-NN intra-ligand distance signature.
         if self.intra_ligand_multidist:
@@ -721,6 +759,9 @@ class UMAInverse(nn.Module):
         residue_ligand_frame_angles = (
             batch.get("residue_ligand_frame_angles") if self.frame_relative_angles else None
         )
+        ligand_bond_types = (
+            batch.get("ligand_bond_types") if self.ligand_bond_topology else None
+        )
         z = self._init_pair(
             node_repr=node_repr,
             coords=coords,
@@ -728,6 +769,7 @@ class UMAInverse(nn.Module):
             residue_count=residue_count,
             residue_backbone_coords=residue_backbone_coords,
             residue_ligand_frame_angles=residue_ligand_frame_angles,
+            ligand_bond_types=ligand_bond_types,
         )
         z = self.encoder(z, pair_mask.to(dtype=z.dtype))
 

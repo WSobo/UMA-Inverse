@@ -150,6 +150,8 @@ def main(cfg: DictConfig) -> None:
         return_sidechain_atoms=bool(cfg.data.get("return_sidechain_atoms", False)),
         sidechain_context_rate=float(cfg.data.get("sidechain_context_rate", 0.0)),
         aug_seed=int(cfg.get("seed", 0)),
+        return_rich_ligand_features=bool(cfg.data.get("ligand_rich_features", False)),
+        return_bond_topology=bool(cfg.data.get("ligand_bond_topology", False)),
     )
 
     # ── LR schedule parameters ─────────────────────────────────────────────────

@@ -1601,6 +1601,25 @@ wheels = [
 ]
 
 [[package]]
+name = "rdkit"
+version = "2026.3.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "pillow" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/10/c1/b3e8469291a9725eda29e911987f39be8a625b78f78d64bdc731ddda852f/rdkit-2026.3.2-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:c30bf6846b2f55a24b0e2beba7f0480dd948a73bfc13ad95cdb29f839586a497", size = 29984328, upload-time = "2026-05-16T11:47:10.123Z" },
+    { url = "https://files.pythonhosted.org/packages/f2/46/47f8ab91a05a6b060852a8484b555256a8f32b740c67560b00560ef56eb5/rdkit-2026.3.2-cp313-cp313-manylinux_2_28_aarch64.whl", hash = "sha256:fb14f634f630cac27e6484bf01a789a2ae8e8dbea96c87e365ff956b31c384a2", size = 35575509, upload-time = "2026-05-16T11:47:15.281Z" },
+    { url = "https://files.pythonhosted.org/packages/cb/ed/568c508712bb4f1b94b9b85f3a514aedcd37da73fb08d6ef22a3b0981698/rdkit-2026.3.2-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:9908eff69e89da927006b9513adaf7985b46bf0b213cf204a2529d367e932dda", size = 37089613, upload-time = "2026-05-16T11:47:20.002Z" },
+    { url = "https://files.pythonhosted.org/packages/e7/39/8e095f9406d7416b9c1284817c62049dccc801008ee98a8aaa7a68c609bf/rdkit-2026.3.2-cp313-cp313-win_amd64.whl", hash = "sha256:b4a3e15fd1e9986284288362ef415478d5a895c9409c72a3fa9320e728b76ca3", size = 24612214, upload-time = "2026-05-16T11:47:23.628Z" },
+    { url = "https://files.pythonhosted.org/packages/bc/eb/8325049d449e901fa6ff28f1f5ff9f98aa95faf2e280cf03d9dc582bf310/rdkit-2026.3.2-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:07ec533914be1a72e00beb24dfda409e3264bf4f0945e062cb616765381998e5", size = 30002251, upload-time = "2026-05-16T11:47:27.52Z" },
+    { url = "https://files.pythonhosted.org/packages/62/7b/edc80ca5ce1343ab15686caf645e43a254ea2b8e7af3a4034655c355d7d5/rdkit-2026.3.2-cp314-cp314-manylinux_2_28_aarch64.whl", hash = "sha256:146829850a725db91d6042a4c46fab2169de7ca8db22f0c889ab29a1646175d1", size = 35612930, upload-time = "2026-05-16T11:47:31.945Z" },
+    { url = "https://files.pythonhosted.org/packages/d1/c7/85d8c89905663550a5962d754aeb44f2dfc81b2968f83d82dd56692dd763/rdkit-2026.3.2-cp314-cp314-manylinux_2_28_x86_64.whl", hash = "sha256:d9deadcf76f9f8d836a3362be1f606ae74bd88fd622cd77a3ddaae71fcad83d9", size = 37102451, upload-time = "2026-05-16T11:47:36.843Z" },
+    { url = "https://files.pythonhosted.org/packages/c9/79/dab566de8d9bd89cd1b627c4f493fa2936114c2004e547069625763353fa/rdkit-2026.3.2-cp314-cp314-win_amd64.whl", hash = "sha256:5190d910e086f54ec640234afd3f3a26882a82f69d7f5d6a75748f5cf9177e93", size = 25097379, upload-time = "2026-05-16T11:47:41.396Z" },
+]
+
+[[package]]
 name = "requests"
 version = "2.33.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1893,6 +1912,7 @@ dependencies = [
     { name = "pandas" },
     { name = "pyarrow" },
     { name = "pytorch-lightning" },
+    { name = "rdkit" },
     { name = "rich" },
     { name = "scipy" },
     { name = "torch" },
@@ -1921,6 +1941,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0" },
     { name = "pytorch-lightning", specifier = ">=2.4" },
+    { name = "rdkit", specifier = ">=2026.3.2" },
     { name = "rich", specifier = ">=13.7" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.7" },
     { name = "scipy", specifier = ">=1.17.1" },

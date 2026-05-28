@@ -57,6 +57,10 @@ model:
   frame_relative_angles: ${data.frame_relative_angles}
   intra_ligand_multidist: false
   coord_noise_std: ${training.coord_noise_std}
+  # v5 mirrors — data layer is authoritative; model reads these to know
+  # which optional layers to instantiate at checkpoint load time.
+  ligand_rich_features: ${data.ligand_rich_features}
+  ligand_bond_topology: ${data.ligand_bond_topology}
 
 data:
   batch_size: 8
@@ -100,6 +104,16 @@ data:
   # conditional decoding from real sidechain geometry, à la LigandMPNN's
   # use_side_chains). Train-only. v3 default = 0.03.
   sidechain_context_rate: 0.0
+  # v5 — RDKit-derived per-atom chemistry features (hybridization, formal
+  # charge, H-bond donor/acceptor, aromaticity, ring membership, degree).
+  # 22-dim float tensor per ligand atom, projected additively onto node repr.
+  # Requires RDKit; falls back to on-the-fly computation when cache misses.
+  # For DNA/RNA-rich structures, consider raising ligand_context_atoms to 50+.
+  ligand_rich_features: false
+  # v5 — covalent bond topology: [M, M] int8 bond-type matrix (0=none,
+  # 1=single, 2=double, 3=triple, 4=aromatic) injected into the [M,M] block
+  # of the pair tensor via a learned 5-class embedding.
+  ligand_bond_topology: false
 
 inference:
   temperature: 0.1

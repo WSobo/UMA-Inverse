@@ -184,6 +184,160 @@ def _construct_virtual_cb(x: torch.Tensor) -> torch.Tensor:
     return -0.58273431 * a + 0.56802827 * b - 0.54067466 * c_vec + ca
 
 
+# ── RDKit-based rich ligand featurization ────────────────────────────────────
+
+def _build_rdkit_mol(
+    coords: torch.Tensor,
+    atomic_nums: torch.Tensor,
+) -> "object | None":
+    """Build an RDKit molecule from heavy-atom coords + atomic numbers.
+
+    Uses rdDetermineBonds to infer connectivity and bond orders from 3D
+    geometry. Falls back to connectivity-only on sanitization failure.
+    Returns None if even connectivity inference fails, so callers can
+    gracefully emit zero features rather than crashing.
+    """
+    try:
+        from rdkit import Chem
+        from rdkit.Chem import rdDetermineBonds
+
+        anum_list = atomic_nums.tolist()
+        xyz_list = coords.tolist()
+
+        def _make_rwmol() -> "Chem.RWMol":
+            rwmol = Chem.RWMol()
+            for anum in anum_list:
+                rdk_anum = int(anum) if 1 <= int(anum) <= 118 else 0
+                rwmol.AddAtom(Chem.Atom(rdk_anum))
+            conf = Chem.Conformer(rwmol.GetNumAtoms())
+            for i, xyz in enumerate(xyz_list):
+                conf.SetAtomPosition(i, (float(xyz[0]), float(xyz[1]), float(xyz[2])))
+            rwmol.AddConformer(conf, assignId=True)
+            return rwmol
+
+        # Full bond-order + aromaticity perception
+        rwmol = _make_rwmol()
+        try:
+            rdDetermineBonds.DetermineBonds(rwmol, charge=0)
+            Chem.SanitizeMol(rwmol)
+            return rwmol.GetMol()
+        except Exception:
+            pass
+
+        # Fallback: connectivity only (single bonds, no aromaticity)
+        rwmol2 = _make_rwmol()
+        try:
+            rdDetermineBonds.DetermineConnectivity(rwmol2)
+            Chem.SanitizeMol(
+                rwmol2,
+                Chem.SanitizeFlags.SANITIZE_ALL ^ Chem.SanitizeFlags.SANITIZE_PROPERTIES,
+            )
+            return rwmol2.GetMol()
+        except Exception:
+            return None
+    except Exception:
+        return None
+
+
+_HYBRIDIZATION_IDX: "dict" = {}  # populated lazily after rdkit import
+
+
+def _get_hybridization_idx() -> "dict":
+    global _HYBRIDIZATION_IDX
+    if not _HYBRIDIZATION_IDX:
+        from rdkit.Chem import rdchem
+        _HYBRIDIZATION_IDX = {
+            rdchem.HybridizationType.SP:    0,
+            rdchem.HybridizationType.SP2:   1,
+            rdchem.HybridizationType.SP3:   2,
+            rdchem.HybridizationType.SP3D:  3,
+            rdchem.HybridizationType.SP3D2: 4,
+            # All other types map to 5 (OTHER)
+        }
+    return _HYBRIDIZATION_IDX
+
+
+def _compute_rich_ligand_features(mol: "object", M: int) -> torch.Tensor:
+    """Extract 22-dim per-atom chemistry features from an RDKit molecule.
+
+    Feature layout (22 total):
+      [0:6]   Hybridization one-hot: SP, SP2, SP3, SP3D, SP3D2, OTHER
+      [6:11]  Formal charge one-hot: ≤-2, -1, 0, +1, ≥+2
+      [11]    H-bond donor (N or O with implicit H after H-removal)
+      [12]    H-bond acceptor (N, O, F, or S)
+      [13]    Is aromatic
+      [14]    Is in ring
+      [15:22] Heavy-atom degree one-hot: 0, 1, 2, 3, 4, 5, ≥6
+
+    All-zero rows are emitted for atoms beyond mol.GetNumAtoms() (padding)
+    or when mol is None.
+    """
+    feat = torch.zeros(M, 22, dtype=torch.float32)
+    if mol is None:
+        return feat
+
+    hyb_idx = _get_hybridization_idx()
+    _HBOND_ACCEPTOR = frozenset({7, 8, 9, 16})  # N, O, F, S
+
+    for i, atom in enumerate(mol.GetAtoms()):
+        if i >= M:
+            break
+        # Hybridization [0:6]
+        feat[i, hyb_idx.get(atom.GetHybridization(), 5)] = 1.0
+        # Formal charge [6:11]: clamp to [-2, +2]
+        charge = max(-2, min(2, atom.GetFormalCharge()))
+        feat[i, 6 + charge + 2] = 1.0
+        # H-bond donor [11]: N or O with at least one implicit H
+        anum = atom.GetAtomicNum()
+        feat[i, 11] = float(anum in (7, 8) and atom.GetTotalNumHs() > 0)
+        # H-bond acceptor [12]
+        feat[i, 12] = float(anum in _HBOND_ACCEPTOR)
+        # Aromaticity [13]
+        feat[i, 13] = float(atom.GetIsAromatic())
+        # In ring [14]
+        feat[i, 14] = float(atom.IsInRing())
+        # Degree [15:22]: clamp at 6
+        feat[i, 15 + min(6, atom.GetDegree())] = 1.0
+
+    return feat
+
+
+def _compute_bond_matrix(mol: "object", M: int) -> torch.Tensor:
+    """Build an [M, M] int8 bond-type matrix from an RDKit molecule.
+
+    Bond type encoding:
+      0 = no bond (also used for padding rows/cols)
+      1 = SINGLE
+      2 = DOUBLE
+      3 = TRIPLE
+      4 = AROMATIC
+    """
+    bond_mat = torch.zeros(M, M, dtype=torch.int8)
+    if mol is None:
+        return bond_mat
+
+    try:
+        from rdkit.Chem import rdchem
+        _BTYPE = {
+            rdchem.BondType.SINGLE:   1,
+            rdchem.BondType.DOUBLE:   2,
+            rdchem.BondType.TRIPLE:   3,
+            rdchem.BondType.AROMATIC: 4,
+        }
+    except Exception:
+        return bond_mat
+
+    for bond in mol.GetBonds():
+        i, j = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
+        if i >= M or j >= M:
+            continue
+        btype = _BTYPE.get(bond.GetBondType(), 1)
+        bond_mat[i, j] = btype
+        bond_mat[j, i] = btype
+
+    return bond_mat
+
+
 def _filter_sidechain_by_residue_mask(
     sc_coords: torch.Tensor,
     sc_atomic: torch.Tensor,
@@ -284,6 +438,8 @@ def load_example_from_pdb(
     return_backbone_coords: bool = False,
     return_frame_relative_angles: bool = False,
     return_sidechain_atoms: bool = False,
+    return_rich_ligand_features: bool = False,
+    return_bond_topology: bool = False,
 ) -> dict[str, object]:
     """Featurize a single PDB file into model-ready tensors.
 
@@ -362,6 +518,7 @@ def load_example_from_pdb(
             f"unknown ligand_featurizer={ligand_featurizer!r}; "
             "expected 'onehot6', 'atomic_number_embedding', or 'ligandmpnn_atomic'"
         )
+    _needs_rdkit = return_rich_ligand_features or return_bond_topology
     if residue_anchor not in ("ca", "cb"):
         raise ValueError(
             f"unknown residue_anchor={residue_anchor!r}; expected 'ca' or 'cb'"
@@ -453,6 +610,13 @@ def load_example_from_pdb(
             ligand_coords   = ligand_coords[keep]
             ligand_elements = ligand_elements[keep]
 
+    # v5: RDKit-based rich features + bond topology, computed on the final
+    # (post-filter, post-trim) ligand atom set so shapes are consistent.
+    # _build_rdkit_mol returns None on any failure; downstream functions
+    # emit all-zero tensors in that case rather than crashing.
+    rdkit_mol = _build_rdkit_mol(ligand_coords, ligand_elements) if _needs_rdkit else None
+    M_lig = ligand_coords.shape[0]
+
     if ligand_featurizer == "onehot6":
         ligand_repr_tensor = _encode_ligand_elements(ligand_elements)
     else:  # "atomic_number_embedding" or "ligandmpnn_atomic" — validated at entry.
@@ -528,6 +692,10 @@ def load_example_from_pdb(
         output["sidechain_coords"]         = sc_coords.float()
         output["sidechain_atomic_numbers"] = sc_atomic.long()
         output["sidechain_residue_idx"]    = sc_residue_idx.long()
+    if return_rich_ligand_features:
+        output["ligand_rich_features"] = _compute_rich_ligand_features(rdkit_mol, M_lig)
+    if return_bond_topology:
+        output["ligand_bond_types"] = _compute_bond_matrix(rdkit_mol, M_lig)
     if residue_ids_valid is not None:
         output["residue_ids"] = residue_ids_valid
     return output

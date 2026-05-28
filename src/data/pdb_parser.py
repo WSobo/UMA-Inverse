@@ -55,6 +55,21 @@ _AA3_TO_TOKEN: dict[str, int] = {
 _BACKBONE_ATOMS: tuple[str, ...] = ("N", "CA", "C", "O")
 _WATER_NAMES = frozenset({"HOH", "WAT", "H2O", "DOD", "DIS", "D2O"})
 
+# Nucleotide residue names whose ATOM records should be added to the ligand
+# context pool (protein+DNA/RNA complexes). Standard bases appear as ATOM
+# records (not HETATM) in most PDB files and would otherwise be silently
+# dropped from both protein and ligand pools.
+_NUCLEOTIDE_RESIDUES: frozenset[str] = frozenset({
+    # Standard DNA
+    "DA", "DC", "DG", "DT",
+    # Standard RNA
+    "A", "C", "G", "U",
+    # Common modified / alternate names
+    "DI", "I",             # (deoxy)inosine
+    "PSU",                 # pseudouridine
+    "ADE", "CYT", "GUA", "THY", "URI",  # legacy 3-letter variants
+})
+
 # ── Element → atomic number (common small-molecule elements only) ─────────────
 # The _encode_ligand_elements function bins these into 6 groups anyway;
 # this map is for populating Y_t which expects raw atomic numbers.
@@ -153,11 +168,27 @@ def parse_pdb(
             het_flag, res_num, icode = residue.get_id()
 
             if het_flag == " ":
+                resname = residue.get_resname().strip()
+
+                # Nucleotide residues (DNA/RNA) appear as ATOM records in most
+                # PDB files. Collect their heavy atoms into the ligand pool so
+                # protein+nucleic-acid complexes are handled correctly.
+                if resname in _NUCLEOTIDE_RESIDUES:
+                    for atom in residue.get_atoms():
+                        if not include_zero_occupancy and atom.get_occupancy() == 0.0:
+                            continue
+                        elem_raw = (atom.element or atom.get_name()[0]).strip().upper()
+                        if elem_raw in ("H", "D"):
+                            continue
+                        atomic_num = _ELEM_TO_ATOMIC_NUM.get(elem_raw, 119)
+                        coord = torch.tensor(atom.get_coord(), dtype=torch.float32)
+                        ligand_atoms.append((coord, atomic_num))
+                    continue
+
                 # Standard amino acid (ATOM record)
                 if parse_chain_set is not None and chain_id not in parse_chain_set:
                     continue
 
-                resname = residue.get_resname().strip()
                 token = _AA3_TO_TOKEN.get(resname, 20)
 
                 coords = torch.zeros(4, 3, dtype=torch.float32)

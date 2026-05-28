@@ -233,6 +233,8 @@ class UMAInverseDataset(Dataset):
         sidechain_context_rate: float = 0.0,
         is_training: bool = False,
         aug_seed: int = 0,
+        return_rich_ligand_features: bool = False,
+        return_bond_topology: bool = False,
     ) -> None:
         self.pdb_dir = pdb_dir
         self.processed_dir = processed_dir
@@ -249,6 +251,8 @@ class UMAInverseDataset(Dataset):
         self.sidechain_context_rate = float(sidechain_context_rate)
         self.is_training = bool(is_training)
         self._aug_rng = random.Random(int(aug_seed))
+        self.return_rich_ligand_features = bool(return_rich_ligand_features)
+        self.return_bond_topology = bool(return_bond_topology)
 
         ids = load_json_ids(json_path)
         self.pdb_ids = [
@@ -395,6 +399,18 @@ class UMAInverseDataset(Dataset):
             out.pop("sidechain_atomic_numbers", None)
             out.pop("sidechain_residue_idx", None)
 
+        # v5: rich ligand features and bond topology. Pre-v5 caches lack these
+        # keys; fall through to the slow RDKit path when they're requested.
+        if self.return_rich_ligand_features and "ligand_rich_features" not in out:
+            return None
+        if not self.return_rich_ligand_features:
+            out.pop("ligand_rich_features", None)
+
+        if self.return_bond_topology and "ligand_bond_types" not in out:
+            return None
+        if not self.return_bond_topology:
+            out.pop("ligand_bond_types", None)
+
         return out
 
     def __getitem__(self, idx: int, _depth: int = 0) -> dict[str, torch.Tensor]:
@@ -463,6 +479,8 @@ class UMAInverseDataset(Dataset):
                 return_backbone_coords=self.return_backbone_coords,
                 return_frame_relative_angles=self.return_frame_relative_angles,
                 return_sidechain_atoms=self.return_sidechain_atoms,
+                return_rich_ligand_features=self.return_rich_ligand_features,
+                return_bond_topology=self.return_bond_topology,
             )
         except (ValueError, OSError, RuntimeError) as e:
             logger.warning("Failed to featurize %s (%s) — sampling replacement", pdb_id, e)
@@ -544,6 +562,17 @@ def _pad_lm_features(
     return out
 
 
+def _pad_square(
+    items: list[torch.Tensor], max_len: int, dtype: torch.dtype
+) -> torch.Tensor:
+    """Pad a list of [M_i, M_i] square matrices into [B, max_len, max_len]."""
+    out = torch.zeros((len(items), max_len, max_len), dtype=dtype)
+    for i, t in enumerate(items):
+        if t.shape[0] > 0:
+            out[i, : t.shape[0], : t.shape[0]] = t
+    return out
+
+
 def collate_batch(batch: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
     """Pad a list of variable-length samples into a single batch dict.
 
@@ -557,6 +586,8 @@ def collate_batch(batch: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tenso
     uses_embedding = "ligand_atomic_numbers" in batch[0]
     uses_backbone = "residue_backbone_coords" in batch[0]
     uses_frame_angles = "residue_ligand_frame_angles" in batch[0]
+    uses_rich_features = "ligand_rich_features" in batch[0]
+    uses_bond_topology = "ligand_bond_types" in batch[0]
 
     out = {
         "residue_coords":   _pad_2d([b["residue_coords"]   for b in batch], max_res, 3, torch.float32),
@@ -589,6 +620,14 @@ def collate_batch(batch: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tenso
             [b["residue_ligand_frame_angles"] for b in batch],
             max_res, max_lig, 4, torch.float32,
         )
+    if uses_rich_features:
+        out["ligand_rich_features"] = _pad_2d(
+            [b["ligand_rich_features"] for b in batch], max_lig, 22, torch.float32,
+        )
+    if uses_bond_topology:
+        out["ligand_bond_types"] = _pad_square(
+            [b["ligand_bond_types"] for b in batch], max_lig, torch.int8,
+        )
     return out
 
 
@@ -614,6 +653,8 @@ class UMAInverseDataModule(pl.LightningDataModule):
         return_sidechain_atoms: bool = False,
         sidechain_context_rate: float = 0.0,
         aug_seed: int = 0,
+        return_rich_ligand_features: bool = False,
+        return_bond_topology: bool = False,
     ) -> None:
         super().__init__()
         self.train_json = train_json
@@ -633,6 +674,8 @@ class UMAInverseDataModule(pl.LightningDataModule):
         self.return_sidechain_atoms = bool(return_sidechain_atoms)
         self.sidechain_context_rate = float(sidechain_context_rate)
         self.aug_seed = int(aug_seed)
+        self.return_rich_ligand_features = bool(return_rich_ligand_features)
+        self.return_bond_topology = bool(return_bond_topology)
 
         self.train_dataset: UMAInverseDataset | None = None
         self.valid_dataset: UMAInverseDataset | None = None
@@ -653,6 +696,8 @@ class UMAInverseDataModule(pl.LightningDataModule):
             sidechain_context_rate=self.sidechain_context_rate,
             is_training=is_training,
             aug_seed=self.aug_seed,
+            return_rich_ligand_features=self.return_rich_ligand_features,
+            return_bond_topology=self.return_bond_topology,
         )
 
     def setup(self, stage: str | None = None) -> None:
