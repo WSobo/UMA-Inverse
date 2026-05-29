@@ -113,6 +113,89 @@ def _format_markdown(data: dict) -> str:
     return "\n".join(lines)
 
 
+@mcp.tool
+def score_structure(
+    pdb: str,
+    sequence: str | None = None,
+    mode: str = "autoregressive",
+) -> str:
+    """Score a protein(-ligand) structure's sequence under UMA-Inverse.
+
+    Returns how well a sequence fits a fixed backbone: per-residue likelihoods,
+    overall perplexity, recovery, and a table of **candidate mutations** — the
+    most "surprising" residues where the model prefers a different amino acid.
+    Useful for downstream insight (flag suboptimal residues, propose mutations).
+    The structure is full PDB text; ligand atoms are read from HETATM records.
+
+    Args:
+        pdb: Full PDB file contents as text.
+        sequence: Optional one-letter AA sequence to score (must match the parsed
+            residue count). Defaults to the structure's native sequence.
+        mode: "autoregressive" (fast) or "single-aa" (per-residue, slower).
+
+    Returns:
+        A markdown summary with a candidate-mutation table.
+    """
+    return score_via_http(pdb, sequence=sequence, mode=mode)
+
+
+def score_via_http(pdb: str, sequence: str | None = None, mode: str = "autoregressive") -> str:
+    """Core logic behind the score tool (decorator-free, so it's directly testable)."""
+    payload = {"pdb": pdb, "sequence": sequence, "mode": mode}
+    try:
+        resp = httpx.post(f"{API_URL}/score", json=payload, timeout=HTTP_TIMEOUT_S)
+    except httpx.HTTPError as exc:
+        return f"**Error contacting UMA-Inverse** at `{API_URL}`: {exc}"
+
+    if resp.status_code == 413:
+        return (
+            "**Structure too large for the CPU demo.** "
+            f"{_detail(resp)} Try a smaller structure."
+        )
+    if resp.status_code in (400, 422):
+        return f"**Invalid request.** {_detail(resp)}"
+    if resp.status_code == 504:
+        return f"**Timed out.** {_detail(resp)}"
+    if resp.status_code != 200:
+        return f"**UMA-Inverse error ({resp.status_code}).** {_detail(resp)}"
+
+    return _format_score_markdown(resp.json())
+
+
+def _format_score_markdown(data: dict) -> str:
+    positions = data.get("positions", [])
+    lines = [
+        "## UMA-Inverse score",
+        "",
+        f"- **Residues:** {data.get('n_residues', '?')}",
+        f"- **Perplexity:** {data.get('perplexity', float('nan')):.2f} "
+        "(lower = the sequence fits the structure better; ~20 = random)",
+        f"- **Mean log-likelihood:** {data.get('mean_log_prob', float('nan')):.3f}",
+        f"- **Recovery (model top-1 == sequence):** {data.get('recovery', float('nan')) * 100:.0f}%",
+        f"- **Inference time:** {data.get('inference_ms', float('nan')):.0f} ms",
+        f"- **Request id:** `{data.get('request_id', '?')}`",
+        "",
+    ]
+    # Candidate mutations: positions where the model prefers a different residue,
+    # ranked by how unlikely the current residue is (lowest log-prob first).
+    candidates = [p for p in positions if p.get("top_aa") != p.get("aa")]
+    candidates.sort(key=lambda p: p.get("log_prob", 0.0))
+    top = candidates[:10]
+    if top:
+        lines.append("### Candidate mutations (most 'surprising' residues)")
+        lines.append("")
+        lines.append("| residue | current | log-prob | model prefers | prob |")
+        lines.append("|---|---|---|---|---|")
+        for p in top:
+            lines.append(
+                f"| {p['residue_id']} | {p['aa']} | {p['log_prob']:.2f} | "
+                f"{p['top_aa']} | {p['top_prob']:.2f} |"
+            )
+    else:
+        lines.append("_The model's top prediction matches the sequence at every position._")
+    return "\n".join(lines)
+
+
 def main() -> None:
     """Run the MCP server over stdio."""
     mcp.run()

@@ -20,17 +20,22 @@ Design notes
 from __future__ import annotations
 
 import logging
+import math
 import os
 import tempfile
 import time
 from pathlib import Path
 from threading import Lock
 
-from src.inference.constraints import DesignConstraints
-from src.inference.decoding import autoregressive_design
+import torch
+
+from src.benchmarks.metrics import recovery_rate
+from src.inference.constraints import DesignConstraints, as_token_ids
+from src.inference.decoding import autoregressive_design, score_sequence
 from src.inference.session import InferenceSession
 from src.inference.weights import resolve_checkpoint
-from src.serving.schemas import InferenceResult
+from src.serving.schemas import InferenceResult, ScorePosition, ScoreResult
+from src.utils.io import ID_TO_AA, ids_to_sequence
 
 logger = logging.getLogger(__name__)
 
@@ -166,6 +171,107 @@ class InferenceEngine:
             except OSError:
                 pass
 
+    def score(
+        self,
+        pdb_str: str,
+        *,
+        sequence: str | None = None,
+        mode: str = "autoregressive",
+        use_sequence: bool = True,
+        num_batches: int = 10,
+        seed: int | None = None,
+    ) -> ScoreResult:
+        """Score a structure's sequence under the model. See :func:`score_inference`."""
+        tmp = tempfile.NamedTemporaryFile(  # noqa: SIM115 — managed in finally
+            mode="w", suffix=".pdb", delete=False, encoding="utf-8"
+        )
+        try:
+            tmp.write(pdb_str)
+            tmp.close()
+
+            ctx = self.session.load_structure(
+                pdb_path=tmp.name,
+                max_total_nodes=max(self.max_residues * 4, 1024),
+            )
+            if ctx.residue_count > self.max_residues:
+                raise InputTooLargeError(ctx.residue_count, self.max_residues)
+
+            seq_tensor = None
+            if sequence is not None:
+                try:
+                    ids = as_token_ids(sequence.strip())
+                except Exception as exc:  # ConstraintError etc. → 400
+                    raise ValueError(f"invalid sequence: {exc}") from exc
+                if len(ids) != ctx.residue_count:
+                    raise ValueError(
+                        f"sequence length {len(ids)} does not match the parsed residue "
+                        f"count {ctx.residue_count}"
+                    )
+                seq_tensor = torch.tensor(ids, dtype=torch.long)
+
+            start = time.perf_counter()
+            result = score_sequence(
+                session=self.session,
+                ctx=ctx,
+                sequence=seq_tensor,
+                mode=mode,  # type: ignore[arg-type]
+                use_sequence=use_sequence,
+                num_batches=num_batches,
+                seed=seed,
+                return_distribution=True,
+            )
+            inference_ms = (time.perf_counter() - start) * 1000.0
+
+            scored = result.sequence  # [L] token ids
+            log_probs = result.log_probs  # [L]
+            full = result.full_log_probs  # [L, 21] log-probs (X col masked to -inf)
+            top_tokens = full.argmax(dim=-1)  # [L] model's preferred residue
+
+            # Aggregate over non-X positions (X = unknown/unscoreable).
+            non_x = scored != 20
+            mean_lp = result.mean_log_prob(non_x)
+            perplexity = math.exp(-mean_lp) if non_x.any() else 1.0
+            recovery = recovery_rate(top_tokens, scored)  # excludes X internally
+
+            positions: list[ScorePosition] = []
+            for i in range(ctx.residue_count):
+                tok = int(scored[i].item())
+                top_tok = int(top_tokens[i].item())
+                lp = float(log_probs[i].item())
+                # An 'X' (unknown) residue is masked to -inf; floor it so the
+                # response stays valid JSON (no Infinity).
+                if not math.isfinite(lp):
+                    lp = -30.0
+                positions.append(
+                    ScorePosition(
+                        position=i,
+                        residue_id=ctx.residue_ids[i],
+                        aa=ID_TO_AA.get(tok, "X"),
+                        log_prob=round(lp, 4),
+                        prob=round(math.exp(lp), 4),
+                        top_aa=ID_TO_AA.get(top_tok, "X"),
+                        top_prob=round(math.exp(float(full[i, top_tok].item())), 4),
+                    )
+                )
+
+            return ScoreResult(
+                positions=positions,
+                mean_log_prob=round(mean_lp, 4),
+                perplexity=round(perplexity, 4),
+                recovery=round(recovery, 4),
+                n_residues=ctx.residue_count,
+                mode=mode,
+                use_sequence=use_sequence,
+                num_batches=num_batches if mode == "autoregressive" else 1,
+                sequence_scored=_ids_to_sequence(scored.tolist()),
+                inference_ms=round(inference_ms, 2),
+            )
+        finally:
+            try:
+                os.unlink(tmp.name)
+            except OSError:
+                pass
+
     def warm_up(self, pdb_path: str | Path) -> None:
         """Run one inference so the first real request isn't cold.
 
@@ -225,8 +331,43 @@ def run_inference(
     )
 
 
+def score_inference(
+    pdb_str: str,
+    *,
+    sequence: str | None = None,
+    mode: str = "autoregressive",
+    use_sequence: bool = True,
+    num_batches: int = 10,
+    seed: int | None = None,
+) -> ScoreResult:
+    """Score a structure's sequence under the model on CPU.
+
+    Returns per-residue log-probabilities, the model's preferred residue at each
+    position (mutation candidates), and aggregate perplexity + recovery.
+
+    Args:
+        pdb_str: Full PDB file contents.
+        sequence: Optional one-letter AA sequence to score (must match the parsed
+            residue count). Defaults to the structure's native sequence.
+        mode: "autoregressive" (fast; num_batches passes) or "single-aa" (slower).
+        use_sequence: If False, the decoder sees structure only (sequence masked).
+        num_batches: Random decoding orders to average (autoregressive mode).
+        seed: Optional RNG seed for the decoding-order sampling.
+
+    Raises:
+        InputTooLargeError: If the structure exceeds the residue cap.
+        ValueError: If a provided sequence is invalid or length-mismatched.
+    """
+    return get_engine().score(
+        pdb_str,
+        sequence=sequence,
+        mode=mode,
+        use_sequence=use_sequence,
+        num_batches=num_batches,
+        seed=seed,
+    )
+
+
 def _ids_to_sequence(token_ids: list[int]) -> str:
     """Map AA token indices to a one-letter string (reuses the project map)."""
-    from src.utils.io import ids_to_sequence
-
     return ids_to_sequence(token_ids)

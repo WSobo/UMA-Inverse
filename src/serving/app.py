@@ -36,9 +36,16 @@ from src.serving.inference import (
     InputTooLargeError,
     get_engine,
     run_inference,
+    score_inference,
 )
 from src.serving.metrics import configure_logging, get_logger
-from src.serving.schemas import DesignRequest, DesignResponse, HealthResponse
+from src.serving.schemas import (
+    DesignRequest,
+    DesignResponse,
+    HealthResponse,
+    ScoreRequest,
+    ScoreResponse,
+)
 
 # ── Runtime configuration (all env-overridable) ────────────────────────────────
 
@@ -51,7 +58,7 @@ EXAMPLES_DIR = Path(__file__).parent / "examples"
 # label to keep the `endpoint` cardinality bounded — otherwise a single UI load
 # spawns ~80 one-off counter series.
 _TRACKED_ENDPOINTS = frozenset(
-    {"/design", "/health", "/metrics", "/docs", "/openapi.json", "/"}
+    {"/design", "/score", "/health", "/metrics", "/docs", "/openapi.json", "/"}
 )
 
 
@@ -266,6 +273,50 @@ def _register_routes(app: FastAPI) -> None:
         request.state.mean_confidence = result.mean_confidence
 
         return DesignResponse(request_id=request.state.request_id, **result.model_dump())
+
+    @app.post("/score", response_model=ScoreResponse)
+    async def score(req: ScoreRequest, request: Request):
+        loop = asyncio.get_running_loop()
+        async with _SEMAPHORE:
+            M.INFLIGHT_REQUESTS.inc()
+            try:
+                result = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        None,
+                        lambda: score_inference(
+                            req.pdb,
+                            sequence=req.sequence,
+                            mode=req.mode,
+                            use_sequence=req.use_sequence,
+                            num_batches=req.num_batches,
+                        ),
+                    ),
+                    timeout=REQUEST_TIMEOUT_S,
+                )
+            except TimeoutError:
+                return JSONResponse(
+                    status_code=504,
+                    content={
+                        "error": "timeout",
+                        "detail": (
+                            f"scoring exceeded {REQUEST_TIMEOUT_S:.0f}s. Try a smaller "
+                            "structure, fewer batches, or autoregressive mode."
+                        ),
+                        "request_id": request.state.request_id,
+                    },
+                )
+            finally:
+                M.INFLIGHT_REQUESTS.dec()
+
+        M.record_score_metrics(
+            n_residues=result.n_residues,
+            perplexity=result.perplexity,
+            inference_ms=result.inference_ms,
+        )
+        request.state.inference_ms = result.inference_ms
+        request.state.input_residues = result.n_residues
+
+        return ScoreResponse(request_id=request.state.request_id, **result.model_dump())
 
     @app.get("/health", response_model=HealthResponse)
     async def health():

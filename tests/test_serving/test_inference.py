@@ -51,6 +51,23 @@ def test_run_inference_shapes_and_bounds(engine: InferenceEngine) -> None:
 
 
 @integration
+def test_score_native_sequence(engine: InferenceEngine) -> None:
+    pdb_text = FIXTURE_PDB.read_text(encoding="utf-8")
+    result = engine.score(pdb_text, mode="autoregressive", num_batches=2)
+
+    assert result.n_residues > 0
+    assert len(result.positions) == result.n_residues
+    assert result.perplexity > 0.0
+    assert 0.0 <= result.recovery <= 1.0
+    assert len(result.sequence_scored) == result.n_residues
+    for p in result.positions:
+        assert p.top_aa  # model's preferred residue is populated
+        assert 0.0 <= p.prob <= 1.0
+        assert 0.0 <= p.top_prob <= 1.0
+    assert result.inference_ms > 0.0
+
+
+@integration
 def test_residue_cap_rejects_oversized(engine: InferenceEngine) -> None:
     pdb_text = FIXTURE_PDB.read_text(encoding="utf-8")
     original = engine.max_residues

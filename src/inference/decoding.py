@@ -652,6 +652,11 @@ class ScoreResult:
             decoder (``True``) or masked out as all-X (``False``).
         num_batches: How many random decoding orders were averaged (AR
             mode only; always ``1`` for single-aa).
+        full_log_probs: ``[L, 21]`` float — the (mode-averaged) per-position
+            log-prob distribution over the alphabet, populated only when
+            ``score_sequence(..., return_distribution=True)``. ``None`` otherwise.
+            The X token (index 20) is masked to ``-inf``. Used to surface the
+            model's top-predicted residue per position (mutation candidates).
     """
 
     sequence: torch.Tensor
@@ -659,6 +664,7 @@ class ScoreResult:
     mode: ScoringMode
     use_sequence: bool
     num_batches: int = 1
+    full_log_probs: torch.Tensor | None = None
 
     def mean_log_prob(self, mask: torch.Tensor | None = None) -> float:
         lp = self.log_probs if mask is None else self.log_probs[mask.bool()]
@@ -677,6 +683,7 @@ def score_sequence(
     use_sequence: bool = True,
     num_batches: int = 10,
     seed: int | None = None,
+    return_distribution: bool = False,
 ) -> ScoreResult:
     """Score a sequence under the trained model.
 
@@ -694,6 +701,11 @@ def score_sequence(
             signal the sequence context adds.
         num_batches: Number of random decoding orders to average (AR mode).
         seed: Optional base seed; each random order uses ``seed + i``.
+        return_distribution: When ``True``, also attach the mode-averaged
+            ``[L, 21]`` per-position log-prob distribution as
+            :attr:`ScoreResult.full_log_probs` (for surfacing the model's
+            top-predicted residue per position). Off by default — existing
+            callers are unaffected.
 
     Returns:
         A :class:`ScoreResult` with per-position log-probabilities.
@@ -705,7 +717,7 @@ def score_sequence(
     scored_sequence = scored_sequence.to(device)
 
     if mode == "autoregressive":
-        log_probs = _score_autoregressive(
+        log_probs, full = _score_autoregressive(
             model=model,
             ctx=ctx,
             scored_sequence=scored_sequence,
@@ -719,10 +731,11 @@ def score_sequence(
             mode=mode,
             use_sequence=use_sequence,
             num_batches=num_batches,
+            full_log_probs=full.cpu() if return_distribution else None,
         )
 
     if mode == "single-aa":
-        log_probs = _score_single_aa(
+        log_probs, full = _score_single_aa(
             model=model,
             ctx=ctx,
             scored_sequence=scored_sequence,
@@ -734,6 +747,7 @@ def score_sequence(
             mode=mode,
             use_sequence=use_sequence,
             num_batches=1,
+            full_log_probs=full.cpu() if return_distribution else None,
         )
 
     raise ValueError(f"unknown scoring mode: {mode!r}")
@@ -747,13 +761,18 @@ def _score_autoregressive(
     use_sequence: bool,
     num_batches: int,
     seed: int | None,
-) -> torch.Tensor:
-    """Average per-position log-probs across random decoding orders."""
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Average per-position log-probs across random decoding orders.
+
+    Returns ``(log_probs[L], full_log_probs[L, 21])`` — the second is the
+    mode-averaged distribution over the alphabet at each position.
+    """
     device = ctx.device
     L = ctx.residue_count
     base_seed = seed if seed is not None else torch.randint(0, 2**31 - 1, (1,)).item()
 
     acc_log_probs = torch.zeros(L, device=device)
+    acc_full = torch.zeros(L, 21, device=device)
     for b in range(num_batches):
         g = torch.Generator(device="cpu").manual_seed(int(base_seed + b))
         perm = torch.randperm(L, generator=g).to(device)
@@ -776,11 +795,12 @@ def _score_autoregressive(
         logits = logits.clone()
         logits[:, 20] = float("-inf")
         log_probs_all = torch.log_softmax(logits, dim=-1)
+        acc_full = acc_full + log_probs_all
         acc_log_probs = acc_log_probs + log_probs_all.gather(
             1, scored_sequence.unsqueeze(-1)
         ).squeeze(-1)
 
-    return acc_log_probs / float(num_batches)
+    return acc_log_probs / float(num_batches), acc_full / float(num_batches)
 
 
 def _score_single_aa(
@@ -789,18 +809,23 @@ def _score_single_aa(
     ctx: StructureContext,
     scored_sequence: torch.Tensor,
     use_sequence: bool,
-) -> torch.Tensor:
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Score each position as if it were the only unknown residue.
 
     Runs one forward pass per position with that position masked and all
     other positions fed either the native sequence (``use_sequence=True``)
     or the all-X baseline. Decoding order is rigged so the scored position
     is the last to decode — giving it context from all others.
+
+    Returns ``(log_probs[L], full_log_probs[L, 21])`` — the second holds, at
+    each row ``t``, the distribution computed when position ``t`` was the
+    target.
     """
     device = ctx.device
     L = ctx.residue_count
 
     log_probs_out = torch.zeros(L, device=device)
+    full_out = torch.zeros(L, 21, device=device)
     for target in range(L):
         seq_input = scored_sequence.clone() if use_sequence else torch.full_like(scored_sequence, 20)
         seq_input[target] = 20  # mask target regardless of use_sequence
@@ -826,5 +851,6 @@ def _score_single_aa(
         log_probs_all = torch.log_softmax(logits, dim=-1)
         tok_id = int(scored_sequence[target].item())
         log_probs_out[target] = log_probs_all[target, tok_id]
+        full_out[target] = log_probs_all[target]
 
-    return log_probs_out
+    return log_probs_out, full_out

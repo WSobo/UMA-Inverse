@@ -48,9 +48,15 @@ MEAN_CONFIDENCE = Histogram(
     buckets=(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 1.0),
 )
 
+SCORE_PERPLEXITY = Histogram(
+    "uma_score_perplexity",
+    "Per-request sequence perplexity from /score (lower = sequence fits structure better).",
+    buckets=(1.5, 2, 3, 4, 5, 7, 10, 14, 20),
+)
+
 INFLIGHT_REQUESTS = Gauge(
     "uma_inflight_requests",
-    "Design requests currently executing inference.",
+    "Inference requests currently executing (design or score).",
 )
 
 MODEL_LOAD_SECONDS = Gauge(
@@ -68,6 +74,13 @@ def record_design_metrics(*, n_residues: int, mean_confidence: float, inference_
     INFERENCE_LATENCY.observe(inference_ms / 1000.0)
     REQUEST_SIZE_RESIDUES.observe(n_residues)
     MEAN_CONFIDENCE.observe(mean_confidence)
+
+
+def record_score_metrics(*, n_residues: int, perplexity: float, inference_ms: float) -> None:
+    """Record observability signals for one completed /score request."""
+    INFERENCE_LATENCY.observe(inference_ms / 1000.0)
+    REQUEST_SIZE_RESIDUES.observe(n_residues)
+    SCORE_PERPLEXITY.observe(perplexity)
 
 
 def render_metrics() -> tuple[bytes, str]:

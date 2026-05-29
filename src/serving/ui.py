@@ -26,7 +26,7 @@ import matplotlib.pyplot as plt
 from prometheus_client.parser import text_string_to_metric_families
 
 from src.serving import metrics as M
-from src.serving.inference import DEFAULT_MAX_RESIDUES, run_inference
+from src.serving.inference import DEFAULT_MAX_RESIDUES, run_inference, score_inference
 
 EXAMPLES_DIR = Path(__file__).parent / "examples"
 SELF_URL = os.environ.get("UMA_SELF_URL", "http://127.0.0.1:7860")
@@ -136,6 +136,62 @@ def _design_fn(pdb_text: str, pdb_file, ligand: str, temperature: float, n_sampl
         f"{result.mean_confidence:.3f} · {result.inference_ms:.0f} ms"
     )
     return f"```\n{seqs}\n```", fig, meta
+
+
+# ── Tab: Score ───────────────────────────────────────────────────────────────
+
+
+def _read_pdb(pdb_file, pdb_text: str) -> str:
+    if pdb_file is not None:
+        try:
+            return Path(pdb_file).read_text(encoding="utf-8")
+        except (OSError, TypeError):
+            pass
+    return (pdb_text or "").strip()
+
+
+def _score_figure(positions: list):
+    fig, ax = plt.subplots(figsize=(9, 2.8))
+    xs = [p.position for p in positions]
+    ys = [p.log_prob for p in positions]
+    colors = ["#e34a33" if p.top_aa != p.aa else "#2b8cbe" for p in positions]
+    ax.bar(xs, ys, width=1.0, color=colors)
+    ax.set_xlabel("residue index")
+    ax.set_ylabel("log-likelihood")
+    ax.set_title("per-residue log-likelihood (red = model prefers a different residue)")
+    fig.tight_layout()
+    return fig
+
+
+def _score_fn(pdb_text: str, pdb_file, sequence: str, mode: str):
+    pdb_str = _read_pdb(pdb_file, pdb_text)
+    if not pdb_str:
+        return "⚠️ Provide a PDB (paste text or upload a file).", None, []
+    seq = (sequence or "").strip() or None
+    try:
+        result = score_inference(pdb_str, sequence=seq, mode=mode)
+    except Exception as exc:  # noqa: BLE001 — surface errors to the UI cleanly
+        return f"❌ {type(exc).__name__}: {exc}", None, []
+
+    M.record_score_metrics(
+        n_residues=result.n_residues,
+        perplexity=result.perplexity,
+        inference_ms=result.inference_ms,
+    )
+    fig = _score_figure(result.positions)
+    summary = (
+        f"**Perplexity:** {result.perplexity:.2f} (lower = sequence fits structure better) · "
+        f"**recovery:** {result.recovery * 100:.0f}% · "
+        f"**{result.n_residues} residues** · {result.inference_ms:.0f} ms · mode={result.mode}"
+    )
+    candidates = sorted(
+        (p for p in result.positions if p.top_aa != p.aa), key=lambda p: p.log_prob
+    )[:15]
+    rows = [
+        [p.residue_id, p.aa, round(p.log_prob, 2), p.top_aa, round(p.top_prob, 2)]
+        for p in candidates
+    ]
+    return summary, fig, rows
 
 
 # ── Tab 2: Live metrics ──────────────────────────────────────────────────────────
@@ -298,16 +354,28 @@ curl -X POST "$SPACE_URL/design" \\
   -d "{{\\"pdb\\": \\"$(cat structure.pdb | sed 's/\\"/\\\\\\"/g')\\", \\"n_samples\\": 2}}"
 ```
 
+### `POST /score`
+```json
+{{ "pdb": "<full PDB text>", "sequence": null, "mode": "autoregressive" }}
+```
+Scores a sequence against the structure. Returns per-residue `log_prob`/`prob`,
+the model's preferred residue (`top_aa`/`top_prob`), overall `perplexity` (lower =
+better fit), `recovery`, and per-position records — so an agent can flag suboptimal
+residues and propose mutations. Omit `sequence` to score the native sequence.
+
 ### Other endpoints
 - `GET /health` — liveness (`status`, `model_loaded`, `uptime_s`)
-- `GET /metrics` — Prometheus exposition (latency histograms, confidence, counts)
+- `GET /metrics` — Prometheus exposition (latency histograms, confidence, perplexity, counts)
 - `GET /docs` — OpenAPI schema (the agent-readable contract)
 
 ## Agent usage (MCP)
-An MCP tool `design_sequence_for_structure(pdb, ligand?, temperature?)` wraps the
-`/design` endpoint and returns a markdown result, so an agent can retrieve a
-structure (e.g. via genesis-bio-mcp) and then call this model to redesign it.
-See the repository's `src/mcp/` for the FastMCP server.
+Two MCP tools (FastMCP server in `src/mcp/`) wrap the endpoints and return markdown:
+- `design_sequence_for_structure(pdb, ligand?, temperature?)` → redesign a backbone.
+- `score_structure(pdb, sequence?, mode?)` → score a sequence and get a
+  **candidate-mutation** table.
+
+The story: an agent retrieves a structure (e.g. via genesis-bio-mcp), **scores** it
+to find suboptimal residues, then **redesigns** it — all against this deployed model.
 """
 
 
@@ -361,6 +429,44 @@ def build_ui() -> gr.Blocks:
             )
             if example_labels:
                 ex_dropdown.change(_load_example, inputs=[ex_dropdown], outputs=[pdb_text])
+
+        with gr.Tab("Score"):
+            with gr.Row():
+                with gr.Column():
+                    gr.Markdown(
+                        "**Score a sequence against its structure** — per-residue "
+                        "likelihood + candidate mutations (positions the model would change)."
+                    )
+                    s_pdb_file = gr.File(
+                        label="📁 Select a .pdb file", file_types=[".pdb"], file_count="single"
+                    )
+                    s_pdb_text = gr.Textbox(label="…or paste PDB text", lines=6)
+                    s_sequence = gr.Textbox(
+                        label="Sequence to score (optional; defaults to the native sequence)",
+                        value="",
+                    )
+                    s_mode = gr.Dropdown(
+                        ["autoregressive", "single-aa"], value="autoregressive", label="mode"
+                    )
+                    s_btn = gr.Button("Score", variant="primary")
+                    if example_labels:
+                        s_ex = gr.Dropdown(example_labels, label="Load bundled example", value=None)
+                with gr.Column():
+                    s_summary = gr.Markdown()
+                    s_plot = gr.Plot(label="per-residue log-likelihood")
+                    s_table = gr.Dataframe(
+                        headers=["residue", "current", "log-prob", "prefers", "prob"],
+                        label="candidate mutations",
+                        interactive=False,
+                    )
+            s_btn.click(
+                _score_fn,
+                inputs=[s_pdb_text, s_pdb_file, s_sequence, s_mode],
+                outputs=[s_summary, s_plot, s_table],
+                concurrency_limit=1,
+            )
+            if example_labels:
+                s_ex.change(_load_example, inputs=[s_ex], outputs=[s_pdb_text])
 
         with gr.Tab("Live metrics"):
             refresh = gr.Button("Refresh metrics")
