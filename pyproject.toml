@@ -52,6 +52,20 @@ dev = [
     "pytest-cov>=5.0",
     "ruff>=0.7",
 ]
+# Serving / observability layer (CPU inference service + Gradio UI + MCP tool).
+# Kept out of the core deps so the training environment stays lean. The
+# container installs CPU-only torch (see Dockerfile) rather than the cu124
+# wheel pinned in [tool.uv.sources] above.
+serving = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "gradio>=5.0",
+    "prometheus-client>=0.21",
+    "structlog>=24.4",
+    "pydantic>=2.9",
+    "httpx>=0.27",
+    "fastmcp>=2.0",
+]
 
 [project.urls]
 Repository = "https://github.com/WSobo/UMA-Inverse"

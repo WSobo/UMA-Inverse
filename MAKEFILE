@@ -137,6 +137,36 @@ benchmark:
 
 
 # ==============================================================================
+# SERVING (CPU service — local / Docker / HF Spaces, NOT the SLURM cluster)
+# ==============================================================================
+# These run on a normal machine (laptop, container, or the Space), not on the
+# HPC cluster, so they are plain commands — no srun wrapping.
+
+PORT ?= 7860
+
+.PHONY: serve
+serve:
+	uv run --extra serving uvicorn src.serving.app:app --host 0.0.0.0 --port $(PORT)
+
+.PHONY: docker-build
+docker-build:
+	docker build -t uma-inverse-serving .
+
+.PHONY: docker-run
+docker-run:
+	docker run --rm -p $(PORT):7860 uma-inverse-serving
+
+.PHONY: mcp
+mcp:
+	uv run --extra serving python -m src.mcp.server
+
+# Precompute bundled-example results (loads the model → run where torch lives).
+.PHONY: precompute-examples
+precompute-examples:
+	$(SRUN_CPU) bash -c 'cd $(CURDIR) && UMA_MAX_RESIDUES=1000 uv run python scripts/precompute_examples.py'
+
+
+# ==============================================================================
 # TESTING & LINTING (CPU only — no GPU needed)
 # ==============================================================================
 .PHONY: test

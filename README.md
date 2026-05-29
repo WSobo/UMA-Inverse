@@ -51,6 +51,84 @@ outputs/my_complex-2026-05-06T14-30-00/
 
 ---
 
+## Serving & Deployment
+
+Beyond the CLI, UMA-Inverse ships a **containerized, monitored REST service** that
+serves the trained model on CPU and exposes it to both humans (Gradio UI) and AI
+agents (MCP tool). It is deploy-ready for **Hugging Face Spaces CPU Basic** (free tier).
+
+- **Live Space:** <https://huggingface.co/spaces/WSobo/uma-inverse>
+  (app: <https://wsobo-uma-inverse.hf.space>) — deploy steps in [`docs/DEPLOY.md`](docs/DEPLOY.md).
+- **Observed CPU latency** (HF Spaces CPU Basic, 2 vCPU): **~50 ms** to design a
+  **46-residue** protein (1CRN); model load ~1.1 s. Autoregressive decoding is one
+  decoder pass per residue, so latency scales ~linearly with length — a ~140-residue
+  structure takes seconds. This is an honest CPU demo (live endpoint capped at 256
+  residues via `UMA_MAX_RESIDUES`); larger workloads belong on a GPU endpoint.
+
+```mermaid
+flowchart LR
+    A["Client / curl"] -->|POST /design| B("FastAPI app")
+    G["Gradio UI"] --> B
+    F["MCP tool<br/>design_sequence_for_structure"] -->|HTTP| B
+    B -->|semaphore + timeout backstop| C["InferenceEngine<br/>singleton, CPU"]
+    C --> D["src.inference<br/>session · decoding"]
+    D --> E[("HF Hub checkpoint")]
+    B --> M["/metrics · structured logs"]
+```
+
+### REST contract
+
+`POST /design`
+
+```json
+{ "pdb": "<full PDB text>", "ligand": null, "temperature": 0.1, "n_samples": 1 }
+```
+
+Returns `sequences`, `per_residue_confidence`, `mean_confidence`, `n_residues`,
+`inference_ms`, `request_id`. Response headers: `X-Request-ID`, `X-Inference-MS`.
+Structures over `UMA_MAX_RESIDUES` (256 on the live Space) → `413`; bad body → `422`;
+timeout backstop → `504`. Other endpoints: `GET /health`, `GET /metrics`
+(Prometheus), `GET /docs` (OpenAPI), `GET /` (Gradio UI).
+
+### Observability
+
+Real metrics from real requests via `prometheus-client` at `/metrics`:
+`uma_inference_latency_seconds` (histogram → p50/p90/p99), `uma_request_size_residues`,
+`uma_mean_confidence`, `uma_requests_total`, `uma_inflight_requests`,
+`uma_model_load_seconds`. Every request emits a JSON log line (request_id,
+endpoint, input size, latency, mean confidence, status) via `structlog`. The
+Gradio "Live metrics" tab renders these.
+
+### Confidence / uncertainty
+
+Surfaced from the model's own output, not recalibrated: **per-residue** confidence
+is the softmax max-probability at each position; the **aggregate** is the existing
+LigandMPNN-style `overall_confidence = exp(mean log p of sampled residues)`.
+
+### Agent (MCP) usage
+
+```bash
+UMA_API_URL=https://<user>-uma-inverse.hf.space uv run python -m src.mcp.server
+```
+
+Exposes one tool, `design_sequence_for_structure(pdb, ligand?, temperature?)`,
+returning a markdown result. The intended story: an agent retrieves a structure
+(e.g. via genesis-bio-mcp) and then calls this deployed model to redesign it.
+
+Run the service locally:
+
+```bash
+uv sync --extra serving
+uv run uvicorn src.serving.app:app --host 0.0.0.0 --port 7860
+# or build the CPU image:
+docker build -t uma-inverse-serving . && docker run -p 7860:7860 uma-inverse-serving
+```
+
+See [`docs/SERVING_NOTES.md`](docs/SERVING_NOTES.md) for the design rationale and
+[`docs/DEPLOY.md`](docs/DEPLOY.md) for the Space deployment steps.
+
+---
+
 ## Inference reference
 
 UMA-Inverse exposes two subcommands: `design` (sample sequences) and `score` (compute per-residue log-likelihoods under the trained model).
