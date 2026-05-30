@@ -42,18 +42,22 @@ the decoder runs once per residue, so latency scales with structure length. A
 faster Gibbs path (`gibbs_design`) exists but was not chosen for the served
 default.
 
-## CPU latency reality (the central constraint)
+## CPU latency & the residue cap (measured)
 
-Autoregressive decoding on a 2-vCPU CPU box (HF Spaces CPU Basic) is **slow** and
-length-dependent — a ~140-residue structure is plausibly tens of seconds, larger
-ones minutes. Mitigations, all honest:
+Inverse folding is **fast** on CPU — measured on HF Spaces CPU Basic: ~50 ms for
+46 residues (1CRN), ~335 ms design / ~35 ms score for 93 residues (1bc8), model
+load ~1.1 s. Latency is not the binding constraint.
 
-1. **Residue cap** (`UMA_MAX_RESIDUES`, default 120): oversized structures get
-   `413` *before* any decode. This is the real protection, not the timeout.
-2. **Precomputed examples**: `scripts/precompute_examples.py` writes
-   `<id>.result.json` next to each bundled example; the UI serves those instantly.
-3. **Honest framing**: README/Space say "live inference works for small proteins
-   on free CPU; production would use a GPU endpoint." No faked latency.
+The binding constraint is **memory**: UMA-Inverse is a *dense* pairwise model — an
+`[N, N, pair_dim]` tensor plus PairMixer triangle-op buffers, i.e. **O(N²) memory**.
+On the free 16 GB box a very large structure can OOM (crashing the single worker
+for everyone) or monopolize the 2 vCPUs.
+
+- **Residue cap** (`UMA_MAX_RESIDUES`, default **600**): oversized structures get
+  `413` *before* any work. This is a memory/shared-worker guard, **not** a speed
+  limit. ~600 keeps peak memory to a couple GB; raise it on hardware with more RAM.
+- **Concurrency**: the `asyncio.Semaphore` serialises inference so one request
+  can't thrash the 2 vCPUs; the request timeout is a response-level backstop only.
 
 > Real measured CPU latency is captured during HF Spaces testing and recorded in
 > the README's Serving section. (The local dev checkout has no GPU/torch env, so

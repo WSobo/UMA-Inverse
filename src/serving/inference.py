@@ -39,11 +39,14 @@ from src.utils.io import ID_TO_AA, ids_to_sequence
 
 logger = logging.getLogger(__name__)
 
-# Live-endpoint residue cap. Autoregressive decoding is O(L) decoder passes;
-# on a 2-vCPU CPU box a few hundred residues is tens of seconds. Override via
-# the UMA_MAX_RESIDUES env var. The bundled examples are served from precomputed
-# results so the cap doesn't limit the demo experience.
-DEFAULT_MAX_RESIDUES = int(os.environ.get("UMA_MAX_RESIDUES", "120"))
+# Live-endpoint residue cap. NOT a latency guard — inverse folding is fast
+# (~hundreds of ms even at a few hundred residues). It's a MEMORY/shared-worker
+# guard: this is a dense pairwise model (an [N, N, pair_dim] tensor plus
+# triangle-op buffers → O(N²) memory), so a very large structure can OOM and
+# crash the single worker on the free 16 GB CPU box, or monopolize the 2 vCPUs.
+# ~600 keeps peak memory to a couple GB and covers essentially all single
+# domains/monomers. Override via UMA_MAX_RESIDUES on beefier hardware.
+DEFAULT_MAX_RESIDUES = int(os.environ.get("UMA_MAX_RESIDUES", "600"))
 
 
 def _project_root() -> Path:
@@ -65,8 +68,9 @@ class InputTooLargeError(ValueError):
         self.max_residues = max_residues
         super().__init__(
             f"structure has {n_residues} residues, which exceeds the serving cap "
-            f"of {max_residues}. This is a CPU demo — design smaller structures "
-            f"or run the model on a GPU for larger ones."
+            f"of {max_residues}. The cap protects the free shared CPU Space from "
+            f"OOM (this is a dense O(N²)-memory pairwise model); raise "
+            f"UMA_MAX_RESIDUES on a deployment with more RAM."
         )
 
 

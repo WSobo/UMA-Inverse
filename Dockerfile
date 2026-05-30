@@ -20,7 +20,10 @@ ENV PYTHONUNBUFFERED=1 \
     HF_HOME=/tmp/.cache/huggingface \
     # Approximate HF Spaces CPU Basic (2 vCPU) and bound interactive latency.
     UMA_TORCH_THREADS=2 \
-    UMA_MAX_RESIDUES=256 \
+    # Memory/shared-worker guard (dense O(N^2) pairwise model on a 16 GB box),
+    # not a latency limit — inverse folding is fast. ~600 covers ~all single
+    # domains/monomers at a couple GB peak.
+    UMA_MAX_RESIDUES=600 \
     UMA_MAX_CONCURRENCY=1 \
     UMA_REQUEST_TIMEOUT_S=300
 

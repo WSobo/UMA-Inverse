@@ -62,8 +62,9 @@ agents (MCP tool). It is deploy-ready for **Hugging Face Spaces CPU Basic** (fre
 - **Observed CPU latency** (HF Spaces CPU Basic, 2 vCPU): **~50 ms** to design a
   **46-residue** protein (1CRN); model load ~1.1 s. Autoregressive decoding is one
   decoder pass per residue, so latency scales ~linearly with length — a ~140-residue
-  structure takes seconds. This is an honest CPU demo (live endpoint capped at 256
-  residues via `UMA_MAX_RESIDUES`); larger workloads belong on a GPU endpoint.
+  structure takes seconds. The live endpoint caps inputs at ~600 residues
+  (`UMA_MAX_RESIDUES`) — a **memory** guard (dense O(N²) pairwise model on the
+  free 16 GB box), not a speed limit; raise it on hardware with more RAM.
 
 ```mermaid
 flowchart LR
@@ -86,7 +87,7 @@ flowchart LR
 
 Returns `sequences`, `per_residue_confidence`, `mean_confidence`, `n_residues`,
 `inference_ms`, `request_id`. Response headers: `X-Request-ID`, `X-Inference-MS`.
-Structures over `UMA_MAX_RESIDUES` (256 on the live Space) → `413`; bad body → `422`;
+Structures over `UMA_MAX_RESIDUES` (~600 on the live Space) → `413`; bad body → `422`;
 timeout backstop → `504`. Other endpoints: `GET /health`, `GET /metrics`
 (Prometheus), `GET /docs` (OpenAPI), `GET /` (Gradio UI).
 

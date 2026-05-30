@@ -71,7 +71,7 @@ model so subsequent requests skip cold-load cost.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `UMA_MAX_RESIDUES` | 120 | Live-endpoint residue cap (413 above it). |
+| `UMA_MAX_RESIDUES` | 600 | Residue cap (413 above it) — a memory guard (dense O(N²) model), not a speed limit. |
 | `UMA_MAX_CONCURRENCY` | 1 | Serialise inference on the 2-vCPU box. |
 | `UMA_REQUEST_TIMEOUT_S` | 300 | Client-facing timeout backstop. |
 | `UMA_TORCH_THREADS` | 2 | Pin CPU threads to the Space's 2 vCPUs. |
