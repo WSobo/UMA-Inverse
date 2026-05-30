@@ -1,5 +1,12 @@
 # UMA-Inverse
 
+[![CI](https://github.com/WSobo/UMA-Inverse/actions/workflows/ci.yml/badge.svg)](https://github.com/WSobo/UMA-Inverse/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-3.13%2B-blue)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Hugging Face Space](https://img.shields.io/badge/%F0%9F%A4%97%20Space-live-yellow)](https://huggingface.co/spaces/WSobo/uma-inverse)
+[![MCP](https://img.shields.io/badge/protocol-MCP-purple)](https://modelcontextprotocol.io)
+[![Built with Claude Code](https://img.shields.io/badge/built%20with-Claude%20Code-D97757)](https://claude.com/claude-code)
+
 **Ligand-conditioned protein inverse folding via dense pair-wise attention.**
 
 Given a fixed protein–ligand backbone, UMA-Inverse predicts per-residue amino-acid identity (20 AA + X) under optional design constraints. The architecture is a single dense PairMixer encoder over the union of residue and ligand-atom nodes — no KNN sparsification — providing every residue a direct edge to every ligand atom. Built and trained on the LigandMPNN data protocol (parser, train/valid/test splits) so numbers are directly comparable.
