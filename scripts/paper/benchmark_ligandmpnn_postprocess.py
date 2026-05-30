@@ -34,14 +34,13 @@ import statistics
 import sys
 from pathlib import Path
 
-import numpy as np
 import torch
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.data.pdb_parser import parse_pdb
 from src.benchmarks.metrics import residue_ligand_distances
+from src.data.pdb_parser import parse_pdb
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("lmpnn_postprocess")
@@ -177,7 +176,8 @@ def main() -> None:
     # ── per_pdb.csv ───────────────────────────────────────────────────────────
     with (args.out_dir / "per_pdb.csv").open("w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=["pdb_id", "recovery", "n_residues"])
-        w.writeheader(); w.writerows(per_pdb_rows)
+        w.writeheader()
+        w.writerows(per_pdb_rows)
 
     # ── per_position.parquet ──────────────────────────────────────────────────
     try:
@@ -204,7 +204,8 @@ def main() -> None:
         })
     with (args.out_dir / "shell_recovery.csv").open("w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=["shell", "lo_A", "hi_A", "n_residues", "recovery"])
-        w.writeheader(); w.writerows(shell_rows)
+        w.writeheader()
+        w.writerows(shell_rows)
 
     # ── summary ───────────────────────────────────────────────────────────────
     recs = [r["recovery"] for r in per_pdb_rows if r["recovery"] == r["recovery"]]
@@ -250,10 +251,10 @@ def main() -> None:
     print(f"\nLigandMPNN benchmark ({len(per_pdb_rows)} PDBs, {len(per_pos_rows)} residues)")
     print(f"  Pooled recovery:    {pooled:.4f}")
     print(f"  Per-PDB median:     {statistics.median(recs):.4f}")
-    print(f"\nShell recovery:")
+    print("\nShell recovery:")
     for r in shell_rows:
         print(f"  {r['shell']:8s}: {r['recovery']:.4f}  (n={r['n_residues']})")
-    print(f"\n[NOTE] Autoregressive T=0.1 — use v3-ar-T0.1 for AR UMA comparison.")
+    print("\n[NOTE] Autoregressive T=0.1 — use v3-ar-T0.1 for AR UMA comparison.")
 
 
 if __name__ == "__main__":

@@ -93,8 +93,8 @@ def main() -> None:
                 ax.set_ylim(max(0.0, min(all_vals) - pad), min(1.0, max(all_vals) + pad))
 
             # Connecting lines behind points
-            for u, l in zip(uma_vals, lig_vals):
-                ax.plot([0, 1], [u, l], color="#555", alpha=0.20, linewidth=0.8)
+            for u, lig in zip(uma_vals, lig_vals):
+                ax.plot([0, 1], [u, lig], color="#555", alpha=0.20, linewidth=0.8)
 
             ax.scatter(np.zeros(len(pids_k)), uma_vals,
                        color=UMA_COLOR, s=40, edgecolor="white", linewidth=0.4,
