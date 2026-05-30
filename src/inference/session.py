@@ -168,18 +168,28 @@ class InferenceSession:
             raise FileNotFoundError(f"config not found: {config_path}")
 
         cfg = OmegaConf.load(config_path)
-
         resolved_device = _resolve_device(device)
-        model_config = OmegaConf.to_container(cfg.model, resolve=True)
-        model = UMAInverse(model_config)  # type: ignore[arg-type]
 
         checkpoint_str: str | None = None
+        ckpt: dict | None = None
         if checkpoint is not None:
             checkpoint_path = Path(checkpoint)
             if not checkpoint_path.exists():
                 raise FileNotFoundError(f"checkpoint not found: {checkpoint_path}")
             checkpoint_str = str(checkpoint_path)
-            _load_weights(model, checkpoint_str)
+            ckpt = torch.load(checkpoint_str, map_location="cpu", weights_only=False)
+            # A checkpoint embeds the architecture it was trained with
+            # (Lightning ``hyper_parameters.model_config``). Prefer it over the
+            # YAML so a drifting ``configs/config.yaml`` can't desync the model
+            # from its weights — a mismatch loads silently via ``strict=False``
+            # and yields a degenerate model. Falls back to the YAML when absent.
+            cfg = _apply_embedded_model_config(cfg, ckpt)
+
+        model_config = OmegaConf.to_container(cfg.model, resolve=True)
+        model = UMAInverse(model_config)  # type: ignore[arg-type]
+
+        if ckpt is not None:
+            _load_weights_from_ckpt(model, ckpt, checkpoint_str)
 
         model = model.to(resolved_device)
         return cls(model=model, config=cfg, device=resolved_device, checkpoint_path=checkpoint_str)
@@ -373,14 +383,56 @@ def _resolve_device(device: str) -> torch.device:
     return torch.device(device)
 
 
-def _load_weights(model: UMAInverse, checkpoint_path: str) -> None:
-    """Load a Lightning ``.ckpt`` into a bare ``UMAInverse`` module.
+# Featurization flags that must match the checkpoint's training config or the
+# model receives wrong inputs (these live in cfg.data and drive load_structure).
+_FEATURIZER_FLAGS = (
+    "ligand_featurizer",
+    "residue_anchor",
+    "pair_distance_atoms",
+    "pair_distance_atoms_ligand",
+    "frame_relative_angles",
+)
 
-    Training saves state under ``model.<param>`` prefixes because the
-    Lightning module wraps the pure torch model. This strips the prefix so
-    the loaded state maps 1:1 onto the module's parameters.
+
+def _apply_embedded_model_config(cfg: DictConfig, ckpt: object) -> DictConfig:
+    """Override ``cfg.model`` (and mirror featurizer flags into ``cfg.data``) with
+    the checkpoint's embedded ``model_config``, when present.
+
+    Lightning checkpoints store the exact ``model_config`` they were trained with
+    under ``hyper_parameters``. Using it makes the loaded model self-describing,
+    so the architecture (and the featurization the data layer performs) always
+    matches the weights regardless of how ``configs/config.yaml`` has drifted.
     """
-    ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    model_config = None
+    if isinstance(ckpt, dict):
+        model_config = (ckpt.get("hyper_parameters") or {}).get("model_config")
+    if not model_config:
+        return cfg
+
+    mc = OmegaConf.create(dict(model_config))
+    cfg.model = mc
+    if "data" not in cfg:
+        cfg.data = {}
+    for flag in _FEATURIZER_FLAGS:
+        if flag in mc:
+            cfg.data[flag] = mc[flag]
+    logger.info(
+        "using checkpoint-embedded architecture (ligand_featurizer=%s, "
+        "pair_distance_atoms=%s, frame_relative_angles=%s)",
+        mc.get("ligand_featurizer"),
+        mc.get("pair_distance_atoms"),
+        mc.get("frame_relative_angles"),
+    )
+    return cfg
+
+
+def _load_weights_from_ckpt(model: UMAInverse, ckpt: object, checkpoint_path: str | None) -> None:
+    """Load an already-loaded Lightning checkpoint dict into a bare ``UMAInverse``.
+
+    Training saves state under ``model.<param>`` prefixes because the Lightning
+    module wraps the pure torch model. This strips the prefix so the loaded state
+    maps 1:1 onto the module's parameters.
+    """
     if not isinstance(ckpt, dict):
         raise ValueError(f"checkpoint is not a dict: {checkpoint_path}")
     state_dict = ckpt.get("state_dict", ckpt)
@@ -390,4 +442,10 @@ def _load_weights(model: UMAInverse, checkpoint_path: str) -> None:
         logger.warning("checkpoint missing keys (%d): %s", len(missing), missing[:5])
     if unexpected:
         logger.warning("checkpoint unexpected keys (%d): %s", len(unexpected), unexpected[:5])
-    logger.info("loaded weights from %s", os.path.basename(checkpoint_path))
+    logger.info("loaded weights from %s", os.path.basename(checkpoint_path or "?"))
+
+
+def _load_weights(model: UMAInverse, checkpoint_path: str) -> None:
+    """Load a Lightning ``.ckpt`` file into a bare ``UMAInverse`` module."""
+    ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    _load_weights_from_ckpt(model, ckpt, checkpoint_path)

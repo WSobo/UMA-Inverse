@@ -28,7 +28,6 @@ from pathlib import Path
 from threading import Lock
 
 import torch
-from omegaconf import OmegaConf
 
 from src.benchmarks.metrics import recovery_rate
 from src.inference.constraints import DesignConstraints, as_token_ids
@@ -53,62 +52,9 @@ def _project_root() -> Path:
 
 
 def _default_config_path() -> Path:
-    """Hydra config matching the checkpoint architecture (self-contained YAML)."""
+    """Hydra config with base data params (architecture comes from the checkpoint)."""
     env = os.environ.get("UMA_CONFIG_PATH")
     return Path(env) if env else _project_root() / "configs" / "config.yaml"
-
-
-# Featurization flags that must match the checkpoint's training config or the
-# model receives wrong inputs (these live in cfg.data and drive load_structure).
-_FEATURIZER_FLAGS = (
-    "ligand_featurizer",
-    "residue_anchor",
-    "pair_distance_atoms",
-    "pair_distance_atoms_ligand",
-    "frame_relative_angles",
-)
-
-
-def _checkpoint_matched_config(cfg_path: Path, ckpt_path: Path):
-    """Return a config whose model architecture matches the checkpoint.
-
-    Lightning checkpoints embed the exact ``model_config`` they were trained
-    with under ``hyper_parameters``. We take the base config from ``cfg_path``
-    (for data params like cutoff/ligand_context_atoms) but overlay the model
-    architecture and featurizer flags from the checkpoint — so a drifting
-    ``configs/config.yaml`` can't desync the served model from its weights.
-    """
-    cfg = OmegaConf.load(cfg_path)
-    try:
-        ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
-    except Exception as exc:  # noqa: BLE001 — fall back to the YAML on any load error
-        logger.warning("could not read checkpoint hyper_parameters (%s); using config.yaml", exc)
-        return cfg
-
-    model_config = None
-    if isinstance(ckpt, dict):
-        model_config = (ckpt.get("hyper_parameters") or {}).get("model_config")
-
-    if not model_config:
-        logger.warning("checkpoint has no embedded model_config; using config.yaml as-is")
-        return cfg
-
-    mc = OmegaConf.create(dict(model_config))
-    cfg.model = mc  # exact training architecture
-    # Mirror the featurizer flags into cfg.data so featurization matches too.
-    if "data" not in cfg:
-        cfg.data = {}
-    for flag in _FEATURIZER_FLAGS:
-        if flag in mc:
-            cfg.data[flag] = mc[flag]
-    logger.info(
-        "using checkpoint-embedded architecture (ligand_featurizer=%s, "
-        "pair_distance_atoms=%s, frame_relative_angles=%s)",
-        mc.get("ligand_featurizer"),
-        mc.get("pair_distance_atoms"),
-        mc.get("frame_relative_angles"),
-    )
-    return cfg
 
 
 class InputTooLargeError(ValueError):
@@ -147,28 +93,14 @@ class InferenceEngine:
         ckpt_path = resolve_checkpoint(Path(checkpoint) if checkpoint is not None else None)
         logger.info("loading UMA-Inverse checkpoint on CPU: %s", ckpt_path)
 
-        # Build the model from the architecture the checkpoint was TRAINED with
-        # (embedded in its Lightning hyper_parameters) rather than trusting
-        # configs/config.yaml, which drifts across model versions. Mismatched
-        # architecture/featurizer flags load silently via strict=False and yield
-        # a degenerate model — so we make the served model self-describing.
-        matched_cfg = _checkpoint_matched_config(cfg_path, ckpt_path)
-        cfg_file = tempfile.NamedTemporaryFile(  # noqa: SIM115 — managed in finally
-            mode="w", suffix=".yaml", delete=False, encoding="utf-8"
+        # from_checkpoint builds the model from the architecture embedded in the
+        # checkpoint (self-correcting for config.yaml drift), so the served model
+        # always matches its weights.
+        self.session = InferenceSession.from_checkpoint(
+            config_path=cfg_path,
+            checkpoint=ckpt_path,
+            device="cpu",
         )
-        try:
-            OmegaConf.save(matched_cfg, cfg_file.name)
-            cfg_file.close()
-            self.session = InferenceSession.from_checkpoint(
-                config_path=cfg_file.name,
-                checkpoint=ckpt_path,
-                device="cpu",
-            )
-        finally:
-            try:
-                os.unlink(cfg_file.name)
-            except OSError:
-                pass
 
         self.model_load_seconds = time.perf_counter() - load_start
         self.checkpoint_path = str(ckpt_path)
