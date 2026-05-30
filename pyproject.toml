@@ -36,7 +36,10 @@ dependencies = [
     "matplotlib>=3.10.8",
     "numpy>=2.0",
     "omegaconf>=2.3",
-    "pandas>=3.0.2",
+    # Floor relaxed from 3.0.2 so the serving extra can use Gradio 5.x (which
+    # caps pandas<3). Training (uv sync, no gradio) still resolves pandas 3.x;
+    # only the Gradio-5 serving container pins pandas 2.x.
+    "pandas>=2.2",
     "pyarrow>=24.0.0",
     "pytorch-lightning>=2.4",
     "rich>=13.7",
