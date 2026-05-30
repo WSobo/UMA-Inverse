@@ -480,7 +480,9 @@ def build_ui() -> gr.Blocks:
             refresh.click(
                 _metrics_dashboard, outputs=[metrics_md, lat_plot, conf_plot, req_table]
             )
-            demo.load(_metrics_dashboard, outputs=[metrics_md, lat_plot, conf_plot, req_table])
+            # No demo.load() auto-refresh: an on-load event runs through the queue
+            # and can leave the whole page in a "loading" state. Metrics refresh
+            # on demand via the button instead.
 
         with gr.Tab("API / Agent usage"):
             gr.Markdown(_API_DOC)

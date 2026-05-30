@@ -59,7 +59,10 @@ dev = [
 serving = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
-    "gradio>=5.0",
+    # Pin to Gradio 5.x: `>=5.0` resolved to the bleeding-edge v6, which is
+    # flaky mounted on FastAPI behind the HF Spaces Docker proxy. 5.x is the
+    # battle-tested line for mount_gradio_app on Spaces.
+    "gradio>=5.0,<6",
     "prometheus-client>=0.21",
     "structlog>=24.4",
     "pydantic>=2.9",
