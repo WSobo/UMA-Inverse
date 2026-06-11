@@ -63,6 +63,37 @@ def _v3_sample(L: int, M: int, name: str, sc_per_res: int = 4) -> dict[str, torc
     }
 
 
+def test_collate_v5_rich_features_and_bond_topology():
+    """v5 phase A — [B, M, 22] rich features and [B, M, M] bond types must pad
+    cleanly. Padded ligand slots contribute zero. Bond-type matrix uses
+    padding_idx=0 so non-bonded/padded pairs route to the zero embedding.
+    """
+    a = _v3_sample(L=5, M=3, name="A")
+    b = _v3_sample(L=8, M=1, name="B")
+    a["ligand_rich_features"] = torch.randn(3, 22)
+    b["ligand_rich_features"] = torch.randn(1, 22)
+    a["ligand_bond_types"] = torch.randint(0, 5, (3, 3), dtype=torch.int8)
+    b["ligand_bond_types"] = torch.randint(0, 5, (1, 1), dtype=torch.int8)
+    for s in (a, b):
+        for k in ("sidechain_coords", "sidechain_atomic_numbers", "sidechain_residue_idx"):
+            s.pop(k, None)
+
+    batch = collate_batch([a, b])
+
+    assert batch["ligand_rich_features"].shape == (2, 3, 22)
+    # Sample B has M=1, so its rich-feature padded slots must be zero.
+    assert batch["ligand_rich_features"][1, 1:, :].abs().sum() == 0
+
+    assert batch["ligand_bond_types"].shape == (2, 3, 3)
+    assert batch["ligand_bond_types"].dtype == torch.int8
+    # Sample B has M=1, so the padded [1:, :] and [:, 1:] slots must be 0.
+    assert int(batch["ligand_bond_types"][1, 1:, :].sum()) == 0
+    assert int(batch["ligand_bond_types"][1, :, 1:].sum()) == 0
+    # Sample A: only the original 3x3 block can be non-zero (still 3x3 here).
+    # Sanity: the kept block should still have valid bond classes in [0, 4].
+    assert (batch["ligand_bond_types"] >= 0).all() and (batch["ligand_bond_types"] <= 4).all()
+
+
 def test_collate_v3_frame_angles_pad_lm():
     """Frame-angle tensor [L, M, 4] should pad to [B, max_L, max_M, 4].
 
