@@ -24,6 +24,7 @@ export WANDB_API_KEY="${WANDB_API_KEY:?WANDB_API_KEY not set — add it to ~/.ba
 
 STAGE1_DIR=checkpoints/pairmixerinv-v4-stage1-nodes64
 STAGE1_BEST=$(ls "${STAGE1_DIR}"/uma-inverse-*-*.ckpt 2>/dev/null \
+    | grep -Ev -- '-v[0-9]+\.ckpt$' \
     | awk -F'-' '{print $NF, $0}' | sort -n | head -1 | cut -d' ' -f2-)
 STAGE1_CKPT="${STAGE1_BEST:-${STAGE1_DIR}/last.ckpt}"
 echo ">> Stage 2 warm-starting from: ${STAGE1_CKPT}"

@@ -19,11 +19,17 @@ export WANDB_API_KEY="${WANDB_API_KEY:?WANDB_API_KEY not set — add it to ~/.ba
 
 # v4 STAGE 3 DDP2 — 2×A100 80GB, max_total_nodes=384. bsz=8/rank gives effective
 # batch=16, same as original DDP4 plan (effective batch unchanged, dynamics identical).
-# 80GB VRAM makes gradient checkpointing unnecessary. Same schedule as v3 Stage 3
-# (30 epochs, warmup=2k, T_max=280k). Canonical v4 ckpt = min val_loss snapshot.
+# Gradient checkpointing ON: at N=384 the O(N²) pair-tensor activations across 6
+# triangle-mult blocks fill ~40-50 GB; checkpointing recomputes them on backward
+# instead of storing, bringing per-GPU peak back under 80 GB. Same schedule as
+# v3 Stage 3 (30 epochs, warmup=2k, T_max=280k). Canonical v4 ckpt = min val_loss.
 
 STAGE2_DIR=checkpoints/pairmixerinv-v4-stage2-nodes128-ddp2
+# Exclude -vN.ckpt suffixed files: ModelCheckpoint appends these when multiple failed
+# runs saved at the same epoch, making $NF="v1.ckpt" which sorts numerically as 0
+# and falsely beats every real checkpoint.
 STAGE2_BEST=$(ls "${STAGE2_DIR}"/uma-inverse-*-*.ckpt 2>/dev/null \
+    | grep -Ev -- '-v[0-9]+\.ckpt$' \
     | awk -F'-' '{print $NF, $0}' | sort -n | head -1 | cut -d' ' -f2-)
 STAGE2_CKPT="${STAGE2_BEST:-${STAGE2_DIR}/last.ckpt}"
 echo ">> Stage 3 warm-starting from: ${STAGE2_CKPT}"
@@ -32,11 +38,11 @@ echo ">> [v4 STAGE 3 DDP2] 30 epochs at max_total_nodes=384, bsz=8/rank, devices
 srun uv run python scripts/train.py \
     run_name="pairmixerinv-v4-stage3-nodes384-ddp2" \
     ++wandb.enabled=true \
-    ++trainer.max_epochs=30 \
+    ++trainer.max_epochs=24 \
     ++data.max_total_nodes=384 \
     ++data.batch_size=8 \
     ++data.num_workers=8 \
-    ++model.gradient_checkpointing=false \
+    ++model.gradient_checkpointing=true \
     ++training.devices=2 \
     ++training.warmup_steps=2000 \
     ++training.T_max=280000 \
@@ -53,6 +59,7 @@ srun uv run python scripts/train.py \
 CKPT_DIR=checkpoints/pairmixerinv-v4-stage3-nodes384-ddp2
 BEST_NAME=$(ls "${CKPT_DIR}"/uma-inverse-*-*.ckpt 2>/dev/null \
     | xargs -n1 basename \
+    | grep -Ev -- '-v[0-9]+\.ckpt$' \
     | sort -t- -k4 -n \
     | head -1)
 [[ -n "$BEST_NAME" ]] && BEST="${CKPT_DIR}/${BEST_NAME}" || BEST=""
