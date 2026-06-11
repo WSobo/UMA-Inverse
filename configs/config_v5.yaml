@@ -1,0 +1,90 @@
+project_name: UMA-Inverse
+run_name: pairmixerinv-v5
+seed: 42
+
+# Benchmark/inference config matching the v5 Stage-3 training featurization
+# (scripts/SLURM/04c_v5_train_stage3_ddp.sh). Identical to config_v3.yaml
+# EXCEPT ligand_context_atoms: 50 (v5 raised M=25 -> 50 to fit DNA/RNA and
+# larger ligands). The trunk architecture is unchanged from v3/v4, so the v5
+# checkpoint's trunk loads fully; the training-only distogram aux head is
+# dropped by InferenceSession's strict=False loader. v5's rich-ligand and
+# bond-topology layers were trained OFF, so they are absent here too.
+
+paths:
+  train_json: LigandMPNN/training/train.json
+  valid_json: LigandMPNN/training/valid.json
+  pdb_dir: data/raw/pdb_archive
+  output_dir: outputs
+
+training:
+  lr: 3e-4
+  weight_decay: 1e-2
+  epochs: 10
+  devices: 1
+  accelerator: gpu
+  precision: bf16-mixed
+  gradient_clip_val: 1.0
+  log_every_n_steps: 20
+  accumulate_grad_batches: 1
+  compile_model: false
+  warmup_steps: 1000
+  T_max: 280000
+  early_stop_patience: 10
+  # Training-only coord noise; disabled for inference/benchmark.
+  coord_noise_std: 0.0
+
+wandb:
+  enabled: false
+  mode: offline
+
+model:
+  residue_input_dim: 6
+  ligand_input_dim: 6
+  node_dim: 128
+  pair_dim: 128
+  pair_hidden_dim: 128
+  num_pairmixer_blocks: 6
+  pair_transition_mult: 4
+  num_rbf: 32
+  max_distance: 24.0
+  dropout: 0.1
+  gradient_checkpointing: false
+  thermal_noise_std: 0.0
+  # Data layer is the authoritative source of truth; model mirrors it.
+  ligand_featurizer: ${data.ligand_featurizer}
+  residue_anchor: ${data.residue_anchor}
+  pair_distance_atoms: ${data.pair_distance_atoms}
+  pair_distance_atoms_ligand: ${data.pair_distance_atoms_ligand}
+  frame_relative_angles: ${data.frame_relative_angles}
+  intra_ligand_multidist: false
+  coord_noise_std: ${training.coord_noise_std}
+
+# v5 featurization — matches the 04c_v5_train_stage3_ddp.sh ++data.* overrides,
+# with training-only augmentations (sidechain_context_rate) left at their
+# inference no-op values.
+data:
+  batch_size: 8
+  num_workers: 8
+  pin_memory: true
+  # v5: M raised to 50 to fit DNA/RNA and larger ligands (v3/v4 used 25).
+  ligand_context_atoms: 50
+  cutoff_for_score: 8.0
+  max_total_nodes: 384
+  # LigandMPNN-faithful element featurizer (atomic_num + group + period).
+  ligand_featurizer: ligandmpnn_atomic
+  residue_anchor: cb
+  # Full LigandMPNN 25-distance backbone-pair set in the L-L block.
+  pair_distance_atoms: backbone_full_25
+  # 5 backbone-atom x ligand-atom distances in the L-M / M-L blocks.
+  pair_distance_atoms_ligand: backbone_full
+  # Per-(residue, ligand-atom) frame-relative sin/cos features in L-M.
+  frame_relative_angles: true
+  # Parser emits per-residue sidechain heavy atoms (needed by the training
+  # augmentation; no-op at inference).
+  return_sidechain_atoms: true
+  # Training-time augmentation rate; ignored at inference.
+  sidechain_context_rate: 0.03
+
+inference:
+  temperature: 0.1
+  keep_native_unknown: true
