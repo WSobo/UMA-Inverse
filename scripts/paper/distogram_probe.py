@@ -52,52 +52,25 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from src.data.ligandmpnn_bridge import resolve_pdb_path  # noqa: E402
 from src.data.pdb_parser import parse_pdb  # noqa: E402
 from src.inference.session import InferenceSession  # noqa: E402
+from src.training.distogram import (  # noqa: E402
+    BIN_HI,
+    BIN_LO,
+    BIN_WIDTH,
+    N_BINS,
+    DistogramHead,
+)
+from src.training.distogram import (
+    bin_centers as _bin_centers,
+)
+from src.training.distogram import (
+    bin_distances as _bin_distances,
+)
+from src.training.distogram import (
+    derive_cb as _derive_cb,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("distogram_probe")
-
-
-# ─── Distance binning (AF3-template style) ────────────────────────────────────
-
-BIN_LO = 3.15
-BIN_HI = 50.75
-N_BINS = 38
-BIN_WIDTH = (BIN_HI - BIN_LO) / N_BINS  # 1.25 Å
-
-
-def _bin_distances(dists: Tensor) -> Tensor:
-    """Bin a [L, L] distance matrix into N_BINS classes.
-
-    Bins 0..N_BINS-1 evenly span [BIN_LO, BIN_HI]. Distances < BIN_LO clamp
-    to bin 0; distances > BIN_HI clamp to bin N_BINS-1. Returns long.
-    """
-    idx = ((dists - BIN_LO) / BIN_WIDTH).long()
-    return idx.clamp(min=0, max=N_BINS - 1)
-
-
-def _bin_centers(device: torch.device, dtype: torch.dtype) -> Tensor:
-    """Center distance for each bin, used for expected-distance MAE."""
-    return torch.linspace(
-        BIN_LO + BIN_WIDTH / 2.0,
-        BIN_HI - BIN_WIDTH / 2.0,
-        N_BINS,
-        device=device,
-        dtype=dtype,
-    )
-
-
-# ─── Cβ derivation (matches the model) ────────────────────────────────────────
-
-
-def _derive_cb(bb: Tensor) -> Tensor:
-    """Virtual Cβ from N/Cα/C. Same constants as uma_inverse.py:421."""
-    n  = bb[..., 0, :]
-    ca = bb[..., 1, :]
-    c  = bb[..., 2, :]
-    b = ca - n
-    c_vec = c - ca
-    a = torch.linalg.cross(b, c_vec, dim=-1)
-    return -0.58273431 * a + 0.56802827 * b - 0.54067466 * c_vec + ca
 
 
 # ─── PDB list resolution (shared with distal_kl_shift) ────────────────────────
@@ -187,22 +160,6 @@ def _extract_pair_features(
 
 
 # ─── Linear probe ─────────────────────────────────────────────────────────────
-
-
-class DistogramHead(nn.Module):
-    """Single linear layer pair_dim -> N_BINS, no bias regularization.
-
-    Kept deliberately tiny — the point is to measure how much geometry the
-    frozen trunk has *already* encoded, not to recover geometry from a deep
-    MLP probe.
-    """
-
-    def __init__(self, pair_dim: int, n_bins: int = N_BINS) -> None:
-        super().__init__()
-        self.proj = nn.Linear(pair_dim, n_bins)
-
-    def forward(self, z: Tensor) -> Tensor:
-        return self.proj(z)
 
 
 def _sample_pair_indices(

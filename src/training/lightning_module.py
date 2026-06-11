@@ -10,6 +10,7 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import LambdaLR
 
 from src.models.uma_inverse import UMAInverse
+from src.training.distogram import DistogramHead, compute_distogram_loss
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,19 @@ class UMAInverseLightningModule(pl.LightningModule):
         self.model = UMAInverse(model_config)
         torch.set_float32_matmul_precision("high")
 
+        # v5 phase A — distogram auxiliary head on residue-residue Z_ij.
+        # Training-only: at inference time the head is unused (and ignored
+        # by InferenceSession's strict=False checkpoint loader).
+        self.distogram_aux_weight = float(model_config.get("distogram_aux_weight", 0.0))
+        distogram_num_bins = int(model_config.get("distogram_num_bins", 38))
+        if self.distogram_aux_weight > 0.0:
+            self.distogram_head = DistogramHead(
+                pair_dim=int(model_config.get("pair_dim", 128)),
+                n_bins=distogram_num_bins,
+            )
+        else:
+            self.distogram_head = None
+
         if compile_model:
             try:
                 self.model = torch.compile(self.model, dynamic=True)
@@ -67,7 +81,12 @@ class UMAInverseLightningModule(pl.LightningModule):
     def _compute_loss_and_metrics(
         self, batch: dict[str, torch.Tensor]
     ) -> dict[str, torch.Tensor]:
-        """Run one forward pass and return loss + accuracy over designed residues."""
+        """Run one forward pass and return loss + accuracy over designed residues.
+
+        When the distogram aux head is active, also returns the auxiliary
+        loss + diagnostic metrics. Caller is responsible for combining
+        ``loss`` and ``distogram_loss`` with the head's λ weight.
+        """
         outputs = self(batch)
         logits = outputs["logits"]
 
@@ -83,7 +102,26 @@ class UMAInverseLightningModule(pl.LightningModule):
             denom = valid_mask.sum().clamp_min(1)
             acc = correct.float() / denom.float()
 
-        return {"loss": loss, "acc": acc}
+        metrics: dict[str, torch.Tensor] = {"loss": loss, "acc": acc}
+
+        if self.distogram_head is not None:
+            bb = batch.get("residue_backbone_coords")
+            if bb is None:
+                raise ValueError(
+                    "distogram_aux_weight>0 requires residue_backbone_coords "
+                    "in the batch; set data.return_backbone_coords=True."
+                )
+            distogram = compute_distogram_loss(
+                pair_repr=outputs["pair_repr"],
+                backbone_coords=bb,
+                residue_mask=batch["residue_mask"],
+                head=self.distogram_head,
+            )
+            metrics["distogram_loss"] = distogram["loss"]
+            metrics["distogram_top1"] = distogram["top1"]
+            metrics["distogram_mae"]  = distogram["mae"]
+
+        return metrics
 
     # ── Training step ─────────────────────────────────────────────────────────
 
@@ -110,11 +148,21 @@ class UMAInverseLightningModule(pl.LightningModule):
             batch["decoding_order"] = torch.stack(orders)
 
         metrics = self._compute_loss_and_metrics(batch)
-        loss = metrics["loss"]
-        acc  = metrics["acc"]
+        ce_loss = metrics["loss"]
+        acc     = metrics["acc"]
 
-        self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
-        self.log("train/acc",  acc,  on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+        if "distogram_loss" in metrics:
+            distogram_loss = metrics["distogram_loss"]
+            total_loss = ce_loss + self.distogram_aux_weight * distogram_loss
+            self.log("train/ce_loss", ce_loss, on_step=True, on_epoch=True, sync_dist=True)
+            self.log("train/distogram_loss", distogram_loss, on_step=True, on_epoch=True, sync_dist=True)
+            self.log("train/distogram_top1", metrics["distogram_top1"], on_step=True, on_epoch=True, sync_dist=True)
+            self.log("train/distogram_mae",  metrics["distogram_mae"],  on_step=True, on_epoch=True, sync_dist=True)
+        else:
+            total_loss = ce_loss
+
+        self.log("train/loss", total_loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log("train/acc",  acc,        on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
         self.log(
             "train/lr",
             self.optimizers().param_groups[0]["lr"],
@@ -122,12 +170,12 @@ class UMAInverseLightningModule(pl.LightningModule):
             prog_bar=False,
             sync_dist=False,
         )
-        return loss
+        return total_loss
 
     def on_before_optimizer_step(self, optimizer) -> None:
         total_norm = sum(
             p.grad.detach().float().norm(2).item() ** 2
-            for p in self.model.parameters()
+            for p in self.parameters()
             if p.grad is not None
         ) ** 0.5
         self.log("train/grad_norm", total_norm, on_step=True, prog_bar=False, sync_dist=True)
@@ -136,14 +184,22 @@ class UMAInverseLightningModule(pl.LightningModule):
 
     def validation_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> None:
         out = self._compute_loss_and_metrics(batch)
-        self.log("val/loss", out["loss"], prog_bar=True, sync_dist=True)
-        self.log("val/acc",  out["acc"],  prog_bar=True, sync_dist=True)
+        if "distogram_loss" in out:
+            total = out["loss"] + self.distogram_aux_weight * out["distogram_loss"]
+            self.log("val/ce_loss", out["loss"], prog_bar=False, sync_dist=True)
+            self.log("val/distogram_loss", out["distogram_loss"], prog_bar=False, sync_dist=True)
+            self.log("val/distogram_top1", out["distogram_top1"], prog_bar=True,  sync_dist=True)
+            self.log("val/distogram_mae",  out["distogram_mae"],  prog_bar=False, sync_dist=True)
+        else:
+            total = out["loss"]
+        self.log("val/loss", total, prog_bar=True, sync_dist=True)
+        self.log("val/acc",  out["acc"], prog_bar=True, sync_dist=True)
 
     # ── Optimiser + scheduler ─────────────────────────────────────────────────
 
     def configure_optimizers(self):
         optimizer = AdamW(
-            self.model.parameters(),
+            self.parameters(),
             lr=self.hparams.lr,
             weight_decay=self.hparams.weight_decay,
         )

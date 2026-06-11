@@ -7,6 +7,9 @@ paths:
   valid_json: LigandMPNN/training/valid.json
   pdb_dir: data/raw/pdb_archive
   output_dir: outputs
+  # Override to point training at the v5 cache (data/processed_v5/).
+  # null → datamodule falls back to data/processed/, the v4 cache.
+  processed_dir: null
 
 training:
   lr: 3e-4
@@ -61,6 +64,15 @@ model:
   # which optional layers to instantiate at checkpoint load time.
   ligand_rich_features: ${data.ligand_rich_features}
   ligand_bond_topology: ${data.ligand_bond_topology}
+  # v5 phase A — distogram auxiliary head on residue-residue Z_ij.
+  # Single Linear(pair_dim, distogram_num_bins) trained jointly with the
+  # CE loss at weight distogram_aux_weight (total = ce + λ * aux).
+  # Targets the encoder_weak verdict from the v3 distogram probe
+  # (top1 0.266). Default off → v4 trains unchanged. The head is
+  # training-only — not used at inference and ignored by
+  # InferenceSession's strict=False checkpoint loader.
+  distogram_aux_weight: 0.0
+  distogram_num_bins: 38
 
 data:
   batch_size: 8

@@ -115,6 +115,12 @@ def main(cfg: DictConfig) -> None:
     train_json = hydra.utils.to_absolute_path(cfg.paths.train_json)
     valid_json = hydra.utils.to_absolute_path(cfg.paths.valid_json)
     pdb_dir    = hydra.utils.to_absolute_path(cfg.paths.pdb_dir)
+    processed_dir_raw = cfg.paths.get("processed_dir", None) if "paths" in cfg else None
+    processed_dir = (
+        hydra.utils.to_absolute_path(str(processed_dir_raw))
+        if processed_dir_raw not in (None, "", "null")
+        else None
+    )
 
     if not os.path.exists(train_json):
         raise FileNotFoundError(f"train_json not found: {train_json}")
@@ -152,6 +158,7 @@ def main(cfg: DictConfig) -> None:
         aug_seed=int(cfg.get("seed", 0)),
         return_rich_ligand_features=bool(cfg.data.get("ligand_rich_features", False)),
         return_bond_topology=bool(cfg.data.get("ligand_bond_topology", False)),
+        processed_dir=processed_dir,
     )
 
     # ── LR schedule parameters ─────────────────────────────────────────────────
@@ -221,6 +228,15 @@ def main(cfg: DictConfig) -> None:
             patience=int(cfg.training.get("early_stop_patience", 10)),
             mode="min",
             check_finite=False,
+            # Pin the check to on_validation_epoch_end (where val/loss is
+            # populated) rather than the train-epoch-end default. On a
+            # resume_from_checkpoint run, Lightning re-fires on_train_epoch_end
+            # at the restored epoch boundary BEFORE validation repopulates
+            # callback_metrics in the fresh process — with the default this
+            # raises "metric val/loss not available" and kills all ranks
+            # instantly. Checking at val-epoch-end is resume-safe and is the
+            # correct hook for a validation-monitored stopper anyway.
+            check_on_train_epoch_end=False,
         ),
         RichProgressBar(),
         RichModelSummary(max_depth=3),
@@ -242,10 +258,23 @@ def main(cfg: DictConfig) -> None:
     os.makedirs(os.path.join(PROJECT_ROOT, "logs", "SLURM_out"), exist_ok=True)
     os.makedirs(os.path.join(PROJECT_ROOT, "logs", "SLURM_err"), exist_ok=True)
 
+    # Raise the DDP collective timeout above the 30-min default: on this shared
+    # Ceph filesystem a dataloader worker can stall during heavy
+    # featurize-and-replace churn (v5 NA structures), and the default NCCL
+    # watchdog then aborts the whole multi-GPU job. A longer timeout lets a
+    # transient I/O stall recover instead of crashing the run.
+    _devices = int(cfg.training.devices)
+    _strategy = "auto"
+    if _devices > 1:
+        from datetime import timedelta
+        from pytorch_lightning.strategies import DDPStrategy
+        _strategy = DDPStrategy(timeout=timedelta(hours=2))
+
     trainer = pl.Trainer(
         max_epochs=max_epochs,
         accelerator=accelerator,
-        devices=int(cfg.training.devices),
+        devices=_devices,
+        strategy=_strategy,
         precision=precision,
         gradient_clip_val=float(cfg.training.gradient_clip_val),
         log_every_n_steps=int(cfg.training.log_every_n_steps),
@@ -274,7 +303,30 @@ def main(cfg: DictConfig) -> None:
             )
             ckpt = torch.load(init_ckpt_path, map_location="cpu", weights_only=False)
             state_dict = ckpt.get("state_dict", ckpt)
-            model.load_state_dict(state_dict, strict=True)
+            # Warm-start is strict EXCEPT for the training-only distogram aux
+            # head. When initialising from a pre-distogram checkpoint (e.g. a v4
+            # run) into a module with distogram_aux_weight>0, the head has no
+            # saved weights and must initialise fresh. Any *other* missing key,
+            # or any unexpected key, still signals a real architecture mismatch
+            # and stays fatal.
+            incompat = model.load_state_dict(state_dict, strict=False)
+            unexpected = list(incompat.unexpected_keys)
+            bad_missing = [
+                k for k in incompat.missing_keys
+                if not k.startswith("distogram_head")
+            ]
+            if unexpected or bad_missing:
+                raise RuntimeError(
+                    "init_from_checkpoint state_dict mismatch — "
+                    f"unexpected={unexpected}, unexpectedly_missing={bad_missing}"
+                )
+            fresh = [k for k in incompat.missing_keys if k.startswith("distogram_head")]
+            if fresh:
+                logger.info(
+                    "init_from_checkpoint: %d aux-head key(s) initialised fresh "
+                    "(absent from source checkpoint): %s",
+                    len(fresh), fresh,
+                )
         else:
             logger.warning("init_from_checkpoint path not found: %s", init_ckpt_path)
 

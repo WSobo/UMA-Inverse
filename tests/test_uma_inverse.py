@@ -128,6 +128,85 @@ def test_uma_inverse_logits_sum_to_nonzero():
     assert out["logits"].abs().sum() > 0
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# v5 Phase A — rich ligand features + bond topology + distogram aux head
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+def test_uma_inverse_v5_rich_features_additive():
+    """Rich [B, M, 22] features must flow through rich_feat_proj when enabled."""
+    cfg = _small_config(
+        ligand_featurizer="atomic_number_embedding",
+        ligand_rich_features=True,
+    )
+    model = UMAInverse(cfg)
+    batch = _make_batch(B=1, L=8, M=4)
+    batch["ligand_atomic_numbers"] = torch.randint(1, 119, (1, 4), dtype=torch.long)
+    batch["ligand_rich_features"]  = torch.randn(1, 4, 22)
+    out = model(batch)
+    assert out["logits"].shape == (1, 8, 21)
+    assert torch.isfinite(out["logits"]).all()
+
+
+def test_uma_inverse_v5_bond_topology_additive():
+    """Bond-type embedding must accept [B, M, M] int8 input without NaN."""
+    cfg = _small_config(
+        ligand_featurizer="atomic_number_embedding",
+        ligand_bond_topology=True,
+    )
+    model = UMAInverse(cfg)
+    batch = _make_batch(B=1, L=8, M=4)
+    batch["ligand_atomic_numbers"] = torch.randint(1, 119, (1, 4), dtype=torch.long)
+    batch["ligand_bond_types"]     = torch.randint(0, 5, (1, 4, 4), dtype=torch.int8)
+    out = model(batch)
+    assert out["logits"].shape == (1, 8, 21)
+    assert out["pair_repr"].shape == (1, 12, 12, cfg["pair_dim"])
+    assert torch.isfinite(out["pair_repr"]).all()
+
+
+def test_lightning_module_distogram_loss_backprops():
+    """Aux head must be optimised end-to-end through the Lightning module."""
+    from src.training.lightning_module import UMAInverseLightningModule
+
+    cfg = _small_config(
+        distogram_aux_weight=0.2,
+        distogram_num_bins=38,
+    )
+    module = UMAInverseLightningModule(
+        model_config=cfg,
+        lr=1e-3,
+        weight_decay=0.0,
+        warmup_steps=10,
+        T_max=100,
+    )
+    assert module.distogram_head is not None
+
+    batch = _make_batch(B=1, L=12, M=3)
+    batch["residue_backbone_coords"] = torch.randn(1, 12, 4, 3)
+
+    metrics = module._compute_loss_and_metrics(batch)
+    assert "distogram_loss" in metrics
+    total = metrics["loss"] + module.distogram_aux_weight * metrics["distogram_loss"]
+    total.backward()
+    assert module.distogram_head.proj.weight.grad is not None
+    assert torch.isfinite(module.distogram_head.proj.weight.grad).all()
+    assert module.distogram_head.proj.weight.grad.abs().sum().item() > 0.0
+
+
+def test_lightning_module_distogram_disabled_by_default():
+    """weight=0 → no head, no aux key in the metrics dict, training matches v4."""
+    from src.training.lightning_module import UMAInverseLightningModule
+
+    cfg = _small_config()  # no distogram_aux_weight set
+    module = UMAInverseLightningModule(
+        model_config=cfg, lr=1e-3, weight_decay=0.0, warmup_steps=10, T_max=100,
+    )
+    assert module.distogram_head is None
+    batch = _make_batch(B=1, L=10, M=3)
+    metrics = module._compute_loss_and_metrics(batch)
+    assert "distogram_loss" not in metrics
+
+
 @pytest.mark.parametrize("B,L,M", [(1, 8, 0), (2, 20, 10), (1, 50, 25)])
 def test_uma_inverse_various_sizes(B, L, M):
     model = UMAInverse(_small_config())
