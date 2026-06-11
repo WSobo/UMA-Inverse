@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=pf-metrics-v3
-#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_out/pf_metrics_v3_%j.out
-#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_err/pf_metrics_v3_%j.err
+#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_out/pf_metrics_v3_%j.out
+#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_err/pf_metrics_v3_%j.err
 #SBATCH --time=0:30:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -21,7 +21,7 @@
 #   outputs/preprint/pocket_fixed_aa_freq.csv
 
 set -e
-cd /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse
+cd /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2
 
 uv run python scripts/paper/compute_pocket_fixed_metrics.py \
     --uma-dir      outputs/preprint/uma_pocket_fixed_v3 \

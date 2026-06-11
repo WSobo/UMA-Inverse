@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=uma-pocket-fixed
-#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_out/uma_pocket_%j.out
-#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_err/uma_pocket_%j.err
+#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_out/uma_pocket_%j.out
+#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_err/uma_pocket_%j.err
 #SBATCH --time=4:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
@@ -17,7 +17,7 @@
 # K=20 sequences per PDB, T=0.1, random decoding order.
 
 set -e
-cd /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse
+cd /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2
 
 echo ">> UMA pocket-fixed designs"
 echo ">>   args: $*"

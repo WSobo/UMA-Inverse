@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=preprint-boltz-cofold
-#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_out/boltz_cofold_%j.out
-#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_err/boltz_cofold_%j.err
+#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_out/boltz_cofold_%j.out
+#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_err/boltz_cofold_%j.err
 #SBATCH --time=12:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -27,7 +27,7 @@ set -e
 eval "$(micromamba shell hook --shell bash)"
 micromamba activate boltz
 
-PROJ=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse
+PROJ=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2
 INPUT_BASE="${PROJ}/outputs/preprint/boltz_inputs/cofold"
 OUT_BASE="${PROJ}/outputs/preprint/cofold"
 CACHE=/private/groups/yehlab/wsobolew/.boltz_cache_shared

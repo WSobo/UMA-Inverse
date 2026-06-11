@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=distogram-probe
-#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_out/distogram_probe_%j.out
-#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_err/distogram_probe_%j.err
+#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_out/distogram_probe_%j.out
+#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_err/distogram_probe_%j.err
 #SBATCH --time=06:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
@@ -24,7 +24,7 @@
 
 set -e
 
-PROJ=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse
+PROJ=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2
 cd "${PROJ}"
 
 PROBE_CKPT="${PROBE_CKPT:-checkpoints/uma-inverse-v3.ckpt}"

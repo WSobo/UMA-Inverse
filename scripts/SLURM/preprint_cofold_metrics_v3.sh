@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=cofold-metrics-v3
-#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_out/cofold_metrics_v3_%j.out
-#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_err/cofold_metrics_v3_%j.err
+#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_out/cofold_metrics_v3_%j.out
+#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_err/cofold_metrics_v3_%j.err
 #SBATCH --time=01:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -14,7 +14,7 @@
 
 set -e
 
-PROJ=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse
+PROJ=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2
 cd "${PROJ}"
 
 SAMPLING="${SAMPLING:-${PROJ}/outputs/preprint/boltz_inputs/cofold_v3/sampling_record.json}"
