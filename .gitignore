@@ -30,6 +30,7 @@ data/raw/*
 !data/raw/.gitkeep
 data/processed/*
 !data/processed/.gitkeep
+data/processed_v5/
 logs/SLURM_out/*
 !logs/SLURM_out/.gitkeep
 logs/SLURM_err/*
@@ -42,9 +43,11 @@ UMA-Fold/
 
 # Scratch notebooks
 ligandMPNN_example_notebook.ipynb
+tea_debug.log
 
 # Local-private docs (preprint source, planning notes — kept locally only)
 docs/private/
+docs/1_preprint_docs/
 docs/v4_plan_draft.md
 ARCHITECTURE_SPEC.md
 
