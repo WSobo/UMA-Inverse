@@ -58,7 +58,9 @@ help:
 	@echo "  make pilot-128      Pilot with max_total_nodes=128"
 	@echo "  make pilot-384      Pilot with max_total_nodes=384"
 	@echo "  make pilot-all      Run all pilot stages via sbatch"
+	@echo "  make pilot-v5       v5 1-batch sanity check (rich + bond + distogram, srun A100)"
 	@echo "  make train          Submit full curriculum training (sbatch)"
+	@echo "  make train-v5       Chain v5 3-stage curriculum via sbatch afterok"
 	@echo "  make inference      Run inference — set PDB=path/to/file.pdb (srun)"
 	@echo "  make test           Run pytest suite (srun, CPU)"
 	@echo "  make test-fast      Run pytest, stop on first failure (srun, CPU)"
@@ -116,6 +118,20 @@ pilot-v4:
 pilot-v4-all:
 	sbatch scripts/SLURM/02_pilot_v4.sh
 
+# v5 pilot — A100 interactive, all v5 flags ON. Targets the v5 cache at
+# data/processed_v5/; expects that directory to be populated via
+# `uv run python scripts/preprocess_v5.py` first. The aux head must drive
+# train/distogram_top1 > 0.5 inside 200 steps for the wiring to be correct.
+.PHONY: pilot-v5
+pilot-v5:
+	$(SRUN_A100) bash -c 'cd $(CURDIR) && uv run python scripts/pilot_run.py \
+		++paths.processed_dir=data/processed_v5 \
+		++data.ligand_context_atoms=50 \
+		++data.ligand_rich_features=false \
+		++data.ligand_bond_topology=false \
+		++model.distogram_aux_weight=0.2 \
+		++model.distogram_num_bins=38'
+
 
 # ==============================================================================
 # TRAINING
@@ -123,6 +139,18 @@ pilot-v4-all:
 .PHONY: train
 train:
 	sbatch scripts/SLURM/03_train_model.sh
+
+# v5 full curriculum — chains stage 1 → stage 2 → stage 3 via afterok
+# dependencies so a single `make train-v5` queues the whole 3-stage run.
+# Requires data/processed_v5/ populated (see scripts/preprocess_v5.py).
+.PHONY: train-v5
+train-v5:
+	@J1=$$(sbatch --parsable scripts/SLURM/04a_v5_train_stage1.sh) ; \
+	  echo "Stage 1 jobid: $$J1" ; \
+	  J2=$$(sbatch --parsable --dependency=afterok:$$J1 scripts/SLURM/04b_v5_train_stage2_ddp.sh) ; \
+	  echo "Stage 2 jobid: $$J2 (afterok:$$J1)" ; \
+	  J3=$$(sbatch --parsable --dependency=afterok:$$J2 scripts/SLURM/04c_v5_train_stage3_ddp.sh) ; \
+	  echo "Stage 3 jobid: $$J3 (afterok:$$J2)"
 
 
 # ==============================================================================
