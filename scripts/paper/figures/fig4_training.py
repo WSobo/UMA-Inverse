@@ -24,9 +24,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 STAGES = (
-    ("stage1-nodes64",          "version_0", "Stage 1 — single A5500 (max nodes 64)",        15),
-    ("stage2-nodes128-ddp4",    "version_0", "Stage 2 — 4× A5500 DDP (max nodes 128)",       25),
-    ("stage3-nodes384-ddp8",    "version_0", "Stage 3 — 8× A5500 DDP (max nodes 384)",       30),
+    ("stage1-nodes64",       ["version_2"],              "Stage 1 — max nodes 64",             16),
+    ("stage2-nodes128-ddp2", ["version_0", "version_2"], "Stage 2 — 2-GPU DDP, max nodes 128", 24),
+    ("stage3-nodes384-ddp2", ["version_0", "version_1"], "Stage 3 — 2-GPU DDP, max nodes 384", 24),
 )
 
 
@@ -74,9 +74,18 @@ def main() -> None:
 
     fig, axes = plt.subplots(2, 3, figsize=(11, 6), sharex=False)
 
-    for col, (stage_name, version, title, max_epochs) in enumerate(STAGES):
-        metrics_csv = (args.logs_dir / f"pairmixerinv-v3-{stage_name}" / version / "metrics.csv")
-        epochs, val_acc, val_loss = _load_val_curve(metrics_csv)
+    for col, (stage_name, versions, title, max_epochs) in enumerate(STAGES):
+        # A stage's curve can span multiple CSVLogger versions (training resumes);
+        # concatenate them and keep one row per epoch (later version wins on overlap).
+        by_epoch: dict[int, tuple[float, float]] = {}
+        for version in versions:
+            metrics_csv = args.logs_dir / f"pairmixerinv-v5-{stage_name}" / version / "metrics.csv"
+            e, a, l = _load_val_curve(metrics_csv)
+            for ep, acc, loss in zip(e, a, l):
+                by_epoch[ep] = (acc, loss)
+        epochs = sorted(by_epoch)
+        val_acc = [by_epoch[ep][0] for ep in epochs]
+        val_loss = [by_epoch[ep][1] for ep in epochs]
         ax_acc = axes[0, col]
         ax_loss = axes[1, col]
 
@@ -111,7 +120,7 @@ def main() -> None:
             ax_loss.set_ylabel("val loss", fontsize=10)
 
     fig.suptitle(
-        "v3 3-stage curriculum: val accuracy and val loss per epoch (red star = best per stage)",
+        "UMA-Inverse 3-stage curriculum: val accuracy and val loss per epoch (red star = best per stage)",
         fontsize=11, y=1.0,
     )
     plt.tight_layout()
