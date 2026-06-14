@@ -1,11 +1,9 @@
-"""Figure 1: UMA-Inverse architecture overview (schematic, no data).
+"""Figure 1: UMA-Inverse architecture overview (polished schematic, no data).
 
 End-to-end pipeline: inputs -> featurizer -> PairMixer encoder (x6) -> pair tensor
 Z -> {distogram head (auxiliary), ligand-attention decoder -> sequence}. The
-internals of the PairMixer block are not shown here; see the PairMixer reference
-cited in the caption.
+PairMixer block internals are not shown (cited in the caption).
 
-Hand-tunable matplotlib schematic; refine in a vector editor if desired.
 Output: outputs/preprint/figures/fig1_architecture.{pdf,png}
 """
 from __future__ import annotations
@@ -14,30 +12,45 @@ import argparse
 from pathlib import Path
 
 import matplotlib.pyplot as plt
-from matplotlib.patches import FancyBboxPatch, FancyArrowPatch
+from matplotlib.patches import FancyBboxPatch, FancyArrowPatch, Rectangle
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
-BLUE = "#2C5F8E"
-LBLUE = "#D6E2EF"
-GREEN = "#3F7D5A"
-LGREEN = "#D8E8DF"
-GREY = "#888888"
-LGREY = "#ECECEC"
-GOLD = "#C9A227"
-LGOLD = "#F3E9C6"
+INK = "#1A1A1A"
+BLUE, LBLUE = "#2C5F8E", "#DCE7F2"
+GREEN, LGREEN = "#3F7D5A", "#DBEAE1"
+GOLD, LGOLD = "#B8901F", "#F4ECCD"
+GREY, LGREY = "#6E6E6E", "#EDEDED"
+
+FIG_W, FIG_H = 12.0, 3.5
+ASPECT = FIG_W / FIG_H  # to render grid cells square in data coords
 
 
-def box(ax, x, y, w, h, text, fc, ec, fs=9, bold=False):
-    ax.add_patch(FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0.006,rounding_size=0.015",
-                                linewidth=1.3, facecolor=fc, edgecolor=ec, zorder=2))
+def box(ax, x, y, w, h, text, fc, ec, fs=9.5, bold=False, tc=INK):
+    ax.add_patch(FancyBboxPatch((x, y), w, h,
+                                boxstyle="round,pad=0.004,rounding_size=0.018",
+                                linewidth=1.4, facecolor=fc, edgecolor=ec, zorder=3))
     ax.text(x + w / 2, y + h / 2, text, ha="center", va="center", fontsize=fs,
-            zorder=3, fontweight="bold" if bold else "normal", color="black")
+            zorder=4, fontweight="bold" if bold else "normal", color=tc)
 
 
-def arrow(ax, x1, y1, x2, y2, color="black", style="-|>", lw=1.7):
-    ax.add_patch(FancyArrowPatch((x1, y1), (x2, y2), arrowstyle=style, mutation_scale=15,
-                                 linewidth=lw, color=color, zorder=1))
+def arrow(ax, x1, y1, x2, y2, color=INK, lw=1.8):
+    ax.add_patch(FancyArrowPatch((x1, y1), (x2, y2), arrowstyle="-|>",
+                                 mutation_scale=15, linewidth=lw, color=color,
+                                 shrinkA=2, shrinkB=2, zorder=2))
+
+
+def grid_glyph(ax, cx, cy, gw=0.052, n=5):
+    """A small N×N grid to depict the pair tensor Z (cells kept square)."""
+    gh = gw * ASPECT
+    cw, ch = gw / n, gh / n
+    x0, y0 = cx - gw / 2, cy - gh / 2
+    for i in range(n):
+        for j in range(n):
+            shade = LBLUE if (i + j) % 2 == 0 else "#EEF3F9"
+            ax.add_patch(Rectangle((x0 + j * cw, y0 + i * ch), cw, ch,
+                                   facecolor=shade, edgecolor=BLUE, linewidth=0.35, zorder=3))
+    ax.add_patch(Rectangle((x0, y0), gw, gh, fill=False, edgecolor=BLUE, linewidth=1.6, zorder=4))
 
 
 def main() -> None:
@@ -47,41 +60,45 @@ def main() -> None:
     args = ap.parse_args()
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
-    fig, ax = plt.subplots(figsize=(11, 3.3))
+    fig, ax = plt.subplots(figsize=(FIG_W, FIG_H))
     ax.set_xlim(0, 1); ax.set_ylim(0, 1); ax.axis("off")
 
-    ymid, h = 0.40, 0.30
-    box(ax, 0.005, ymid, 0.15, h,
-        "Inputs\nbackbone coords +\nligand / NA atoms", LGREY, GREY, fs=9)
-    box(ax, 0.185, ymid, 0.145, h,
-        "Featurize\nnode feats +\npair RBF feats", LGREY, GREY, fs=9)
-    box(ax, 0.365, ymid - 0.02, 0.165, h + 0.04,
-        "PairMixer encoder\n(×6 blocks)\nall residue–residue &\nresidue–ligand pairs",
-        LBLUE, BLUE, fs=9, bold=True)
-    box(ax, 0.565, ymid + 0.03, 0.105, h - 0.06,
-        "pair tensor\n$Z\\in\\mathbb{R}^{N\\times N\\times d}$", "#FFFFFF", BLUE, fs=9)
+    yc, h = 0.46, 0.30   # main row center / box height
 
-    # two heads off Z
-    box(ax, 0.71, ymid + 0.30, 0.28, 0.18,
-        "Distogram head\n(auxiliary loss, training only)", LGOLD, GOLD, fs=9)
-    box(ax, 0.71, ymid + 0.02, 0.28, 0.22,
-        "Ligand-attention decoder\nposition-specific readout of $Z$\n→ autoregressive amino acids",
-        LGREEN, GREEN, fs=9, bold=True)
-    box(ax, 0.745, ymid - 0.26, 0.21, 0.18, "designed sequence\nM K T A Y …", "#FFFFFF", GREEN, fs=9.5)
+    box(ax, 0.005, yc, 0.135, h, "Inputs\nbackbone +\nligand / NA atoms", LGREY, GREY)
+    box(ax, 0.175, yc, 0.135, h, "Featurize\nnode feats +\npair RBF feats", LGREY, GREY)
+    box(ax, 0.345, yc - 0.025, 0.165, h + 0.05,
+        "PairMixer encoder\n($\\times$6 blocks)\nall residue–residue &\nresidue–ligand pairs",
+        LBLUE, BLUE, bold=True)
 
-    arrow(ax, 0.155, ymid + h / 2, 0.185, ymid + h / 2)
-    arrow(ax, 0.330, ymid + h / 2, 0.365, ymid + h / 2)
-    arrow(ax, 0.530, ymid + h / 2, 0.565, ymid + h / 2)
-    arrow(ax, 0.670, ymid + h / 2, 0.71, ymid + 0.39, color=GOLD)     # -> distogram head
-    arrow(ax, 0.670, ymid + h / 2, 0.71, ymid + 0.13, color=GREEN)    # -> decoder
-    arrow(ax, 0.85, ymid + 0.02, 0.85, ymid - 0.08, color=GREEN)      # decoder -> sequence
+    # pair tensor Z as a grid glyph + label
+    zx = 0.595
+    grid_glyph(ax, zx, yc + h / 2)
+    ax.text(zx, yc - 0.045, "pair tensor\n$Z\\in\\mathbb{R}^{N\\times N\\times d}$",
+            ha="center", va="top", fontsize=9, color=INK)
 
-    fig.suptitle("UMA-Inverse architecture", fontsize=13, fontweight="bold", y=1.02)
-    plt.tight_layout()
+    # two heads
+    box(ax, 0.70, yc + 0.33, 0.295, 0.155, "Distogram head", LGOLD, GOLD, fs=9.5)
+    ax.text(0.8475, yc + 0.315, "auxiliary loss — training only",
+            ha="center", va="top", fontsize=7.5, color=GOLD, style="italic")
+    box(ax, 0.70, yc + 0.02, 0.295, 0.22,
+        "Ligand-attention decoder\nposition-specific readout of $Z$\n$\\rightarrow$ autoregressive amino acids",
+        LGREEN, GREEN, bold=True)
+    box(ax, 0.745, yc - 0.27, 0.205, 0.155, "designed sequence\nM K T A Y …", "#FFFFFF", GREEN, fs=9.5)
+
+    # flow arrows
+    arrow(ax, 0.140, yc + h / 2, 0.175, yc + h / 2)
+    arrow(ax, 0.310, yc + h / 2, 0.345, yc + h / 2)
+    arrow(ax, 0.510, yc + h / 2, zx - 0.040, yc + h / 2)
+    arrow(ax, zx + 0.042, yc + h / 2, 0.70, yc + 0.41, color=GOLD)     # -> distogram
+    arrow(ax, zx + 0.042, yc + h / 2, 0.70, yc + 0.13, color=GREEN)    # -> decoder
+    arrow(ax, 0.8475, yc + 0.02, 0.8475, yc - 0.115, color=GREEN)      # decoder -> sequence
+
+    plt.subplots_adjust(left=0.01, right=0.99, top=0.99, bottom=0.01)
     pdf = args.out_dir / "fig1_architecture.pdf"
     png = args.out_dir / "fig1_architecture.png"
     plt.savefig(pdf, bbox_inches="tight")
-    plt.savefig(png, bbox_inches="tight", dpi=200)
+    plt.savefig(png, bbox_inches="tight", dpi=220)
     plt.close()
     print(f"wrote {pdf}")
     print(f"wrote {png}")
