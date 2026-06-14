@@ -35,8 +35,8 @@
 \newcommand{\pending}[1]{\textcolor{red}{[\,#1\,]}}
 
 % -----------------------------------------------------------------------
-\title{\textbf{UMA-Inverse: Ligand- and Nucleic-Acid-Conditioned Protein
-       Inverse Folding with a Distogram-Supervised Dense Pair Encoder}}
+\title{\textbf{UMA-Inverse: Ligand-Conditioned Protein Inverse Folding
+       with a Distogram-Supervised Dense Pair Encoder}}
 
 \author{William Sobolewski\\
         \textit{Yeh Laboratory, UC Santa Cruz}\\
@@ -68,14 +68,17 @@ additionally supervised by an auxiliary \emph{distogram} objective that predicts
 geometry from the pair tensor, sharpening its structural representations. An autoregressive decoder
 conditions each prediction on structural context and previously decoded residues, attending over
 ligand atoms with a learned, position-specific readout of the pair tensor rather than a uniform
-average. UMA-Inverse ingests nucleic-acid chains as ligand context, enabling sequence design against
-DNA/RNA as well as small-molecule and metal cofactors. Trained on a three-stage curriculum and the
+average. UMA-Inverse also routes nucleic-acid chains into this ligand context to extend the approach
+toward DNA/RNA partners. Trained on a three-stage curriculum and the
 public LigandMPNN data split, UMA-Inverse reaches 66.1\% per-PDB teacher-forced sequence
 recovery (perplexity 2.57). On the standard interface recovery benchmark
 (10 autoregressive samples, $T{=}0.1$, 5\,{\AA} sidechain cutoff), it achieves 56.1\%/55.1\%/35.3\%
 (small-molecule/metal/nucleotide), trailing LigandMPNN re-run under the identical protocol by
 $\sim$4/9/18\,pp ($59.8$/$64.4$/$53.3$; LigandMPNN's \emph{published} $63.3$/$77.5$/$50.5$ are higher
-than we reproduce under this protocol). In a pocket-fixed setting---holding the native
+than we reproduce under this protocol). On small-molecule and metal the ligand conditioning helps---UMA-Inverse
+exceeds the ligand-agnostic ProteinMPNN baseline---but on nucleotide it falls \emph{below} it, a
+negative result: a nucleic acid is a macromolecule, not a compact cofactor, and a fixed-size
+ligand-atom context captures only a small fragment of it. In a pocket-fixed setting---holding the native
 binding pocket fixed while redesigning the rest of the protein---UMA-Inverse produces confidently
 folded, ligand-binding-competent redesigns (Boltz-2 ligand ipTM $\approx$0.96; ligand-pose RMSD within
 $\sim$0.6\,{\AA} of the native-sequence floor), though LigandMPNN remains modestly more accurate on
@@ -122,8 +125,8 @@ dense-encoder baseline, each targeting a specific failure mode of pair-tensor in
 (i)~an \textbf{auxiliary distogram objective} that supervises the encoder to make its pair tensor
 explicitly structure-predictive; (ii)~a \textbf{learned ligand-attention decoder} in which each
 residue reads ligand context through a position-specific softmax over the pair tensor rather than a
-uniform mean-pool; and (iii)~\textbf{nucleic-acid conditioning}, routing DNA/RNA chains into the
-ligand atom pool so the model can design against nucleotide partners. The resulting model is compact
+uniform mean-pool; and (iii)~\textbf{nucleic-acid routing}, placing DNA/RNA chains into the
+ligand atom pool to extend the approach toward nucleotide partners. The resulting model is compact
 (${\sim}3.3$\,M parameters), trains end-to-end on commodity GPUs, and produces sequences that fold
 with high Boltz-2 cofolding confidence.
 
@@ -134,8 +137,10 @@ Our main contributions are:
         the encoder's geometry explicit (\S\ref{sec:methods}).
   \item A learned ligand-attention decoder that conditions each residue's prediction on
         position-specific ligand context (\S\ref{sec:arch}).
-  \item Nucleic-acid conditioning that extends ligand-aware design to DNA/RNA partners, enabling
-        evaluation on the LigandMPNN nucleotide split (\S\ref{sec:results_iface}).
+  \item Nucleic-acid routing (DNA/RNA chains into the ligand pool) enabling the first nucleotide-split
+        evaluation for this model line---reported as a \emph{negative result}: it underperforms even the
+        ligand-agnostic baseline, exposing that a fixed-size ligand-atom context is the wrong
+        representation for a macromolecular partner (\S\ref{sec:results_iface}).
   \item A systematic, reproducible evaluation covering teacher-forced recovery, autoregressive
         interface recovery across all three ligand classes, constrained pocket design, Boltz-2
         cofolding, and distance-shell ligand-signal analysis (\S\ref{sec:results}). We report honestly
@@ -200,9 +205,11 @@ nodes are cropped to 384 nodes for batch efficiency during training.
 DNA and RNA chains appear in PDB files as \texttt{ATOM} records with residue names
 \texttt{DA/DC/DG/DT} (DNA) or \texttt{A/C/G/U} (RNA) and a blank HETATM flag, so the standard
 LigandMPNN parser silently discards them. We route these nucleotide atoms into the ligand atom pool,
-giving the model explicit context for protein--nucleic-acid interfaces. This is what enables
-evaluation on the nucleotide test split (\S\ref{sec:results_iface}), which prior UMA-Inverse iterations
-could not address.
+which enables evaluation on the nucleotide test split (\S\ref{sec:results_iface}) that prior
+UMA-Inverse iterations could not address. We flag upfront that this reuses the \emph{compact-ligand}
+atom context for a macromolecule---the 50-atom budget covers only a small fragment of a nucleic acid---and
+\S\ref{sec:results_iface} shows this abstraction is insufficient (indeed counterproductive) for
+nucleotide partners.
 
 \paragraph{Augmentation.}
 Backbone and ligand coordinates receive Gaussian noise ($\sigma{=}0.1$\,{\AA}) during training,
@@ -405,10 +412,16 @@ vs.\ $0.775$)---so the gap is markedly smaller under a controlled comparison tha
 imply; we report both, published values in parentheses. ProteinMPNN (no ligand conditioning, published)
 is a lower bound ($0.505$/$0.406$/$0.471$). Both protein-comparable splits improve over the v3
 predecessor (small molecule $54.5\%\!\to\!56.1\%$, metal $50.0\%\!\to\!55.1\%$). The nucleotide split
-is, to our knowledge, the first such comparison for this model line, enabled by routing nucleic-acid
-chains into the ligand context; at $35.3\%$ it is the largest remaining gap and trails both baselines,
-indicating that ingesting nucleic-acid context is necessary but not yet sufficient for nucleotide
-design---a clear target for future work.
+is, to our knowledge, the first such comparison for this model line, and here the result is frankly
+\textbf{negative}: at $35.3\%$ UMA-Inverse falls not only below LigandMPNN but below the
+ligand-agnostic ProteinMPNN ($47.1\%$). That is, routing the nucleic acid into the model makes it
+\emph{worse} than ignoring ligand context entirely---the opposite of the small-molecule and metal
+splits, where conditioning clearly helps (UMA-Inverse exceeds ProteinMPNN by $5.6$ and $14.5$\,pp).
+We attribute this to a representational mismatch: a nucleic acid is a macromolecule (typically
+$400$--$1500$ heavy atoms in these complexes), but the fixed-size ligand-atom context retains only
+$50$, so the model is fed a small, unrepresentative fragment of the polymer. Treating nucleic acids as
+compact ligands is the wrong abstraction; a dedicated macromolecular representation is required
+(\S\ref{sec:discussion}).
 
 \begin{table}[h]
 \centering
@@ -517,10 +530,12 @@ identity-based objectives---which we leave to future work.
 
 UMA-Inverse shows that a compact ($\sim$$3.3$M-parameter), MSA-free, distogram-supervised dense pair
 encoder---without triangle attention or a sequence track---is a viable architecture for
-ligand-conditioned inverse folding: it trains on commodity GPUs, reaches within $5$--$7$\,pp of
-LigandMPNN's interface recovery, supports nucleic-acid partners, and produces confidently folded,
+ligand-conditioned inverse folding: it trains on commodity GPUs, reaches within $4$--$9$\,pp of
+LigandMPNN on the small-molecule and metal splits, and produces confidently folded,
 ligand-binding-competent sequences. It does not, however, match LigandMPNN, which is more accurate on
-interface recovery, on pocket-fixed distal recovery, and on cofolded ligand pose. We therefore present
+interface recovery, on pocket-fixed distal recovery, and on cofolded ligand pose; and its
+nucleic-acid routing is an outright negative result (below the ligand-agnostic baseline), as a
+macromolecular partner does not fit the compact-ligand representation. We therefore present
 UMA-Inverse as a compact baseline and as the vehicle for one specific, reproducible finding---how a
 dense all-pairs encoder distributes ligand information through a fold---rather than as a
 state-of-the-art design tool. A caveat on the primary metric itself: native-sequence recovery rewards
@@ -537,11 +552,15 @@ these choices by design rationale and the auxiliary head's high top-1 binned-dis
 rather than a controlled on/off ablation.
 
 \paragraph{Remaining gaps.}
-Against our matched-protocol LigandMPNN, the largest residual gap is on nucleotide
-($35.3\%$ vs.\ $53.3\%$); the metal and small-molecule gaps are smaller under this controlled
-comparison ($55.1\%$ vs.\ $64.4\%$ and $56.1\%$ vs.\ $59.8\%$) than LigandMPNN's published numbers
-imply. We do not have a controlled ablation isolating the architectural source of these gaps, and so
-do not attribute them to a specific cause. We also
+Against our matched-protocol LigandMPNN, the metal and small-molecule gaps are modest under this
+controlled comparison ($55.1\%$ vs.\ $64.4\%$ and $56.1\%$ vs.\ $59.8\%$) and smaller than LigandMPNN's
+published numbers imply. The nucleotide split is the clear failure: at $35.3\%$ UMA-Inverse falls below
+even the ligand-agnostic ProteinMPNN ($47.1\%$), so its nucleic-acid conditioning is net-negative. We
+read this as a representational mismatch rather than undertraining---the same model \emph{benefits} from
+small-molecule and metal context, but a nucleic acid is a macromolecule of hundreds to over a thousand
+heavy atoms, of which the fixed-size ligand-atom context retains only $50$, so the model is conditioned
+on an unrepresentative fragment. For the protein-ligand splits we lack a controlled ablation isolating
+the architectural source of the residual gaps, and so do not attribute them to a specific cause. We also
 observe mild late-training calibration drift (validation
 cross-entropy rising while accuracy plateaus), suggesting early stopping by validation loss---rather
 than accuracy---is the correct checkpoint-selection criterion, which we adopt.
@@ -552,9 +571,12 @@ confers any practical advantage on tasks where distal context plausibly matters-
 multi-site design, or function- rather than identity-based objectives---since it demonstrably does not
 help single-position native recovery. A controlled, temperature-matched recovery-vs-diversity (Pareto)
 comparison against LigandMPNN would also place the diversity question on firmer footing than the
-single-temperature snapshot reported here. Other extensions include flow-matching~\citep{lipman2022flow}
-in place of cross-entropy, full RDKit-derived ligand chemistry and bond topology (scaffolded but
-disabled in this model), and adding triangle self-attention to the pair encoder.
+single-temperature snapshot reported here. The nucleotide failure motivates a \emph{dedicated
+macromolecular representation} for nucleic acids---e.g.\ nucleotide-level tokens or a separate
+NA track---rather than forcing a polymer through a fixed-size compact-ligand atom context. Other
+extensions include flow-matching~\citep{lipman2022flow} in place of cross-entropy, full RDKit-derived
+ligand chemistry and bond topology (scaffolded but disabled in this model), and adding triangle
+self-attention to the pair encoder.
 
 % -----------------------------------------------------------------------
 \section{Conclusion}
@@ -563,11 +585,13 @@ We introduced UMA-Inverse, a ligand- and nucleic-acid-conditioned inverse-foldin
 sparse GNN message-passing with a distogram-supervised dense pair encoder and a learned
 ligand-attention decoder. Trained on commodity GPUs using the public LigandMPNN data split, the model
 achieves 66.1\% teacher-forced recovery and 56.1\%/55.1\%/35.3\%
-interface recovery across small-molecule, metal, and nucleotide partners, with confidently folded,
-ligand-binding-competent cofolds. It does not surpass LigandMPNN on recovery or cofolded pose; its
-contribution is to show that a compact, MSA-free, distogram-supervised dense pair encoder is a viable
-alternative architecture, and to characterize its distinctive propagation of ligand information to
-residues far beyond the binding pocket.
+interface recovery on the small-molecule/metal/nucleotide splits, with confidently folded,
+ligand-binding-competent cofolds. It does not surpass LigandMPNN on recovery or cofolded pose, and its
+nucleic-acid routing is a negative result (below the ligand-agnostic baseline---a macromolecule is the
+wrong fit for a compact-ligand context). Its contribution is to show that a compact, MSA-free,
+distogram-supervised dense pair encoder is a viable alternative architecture for small-molecule and
+metal partners, and to characterize its distinctive propagation of ligand information to residues far
+beyond the binding pocket.
 
 \paragraph{Code and data availability.}
 Code, the trained checkpoint, and evaluation scripts are released at
