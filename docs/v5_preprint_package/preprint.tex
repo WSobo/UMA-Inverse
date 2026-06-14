@@ -29,17 +29,11 @@
 \newcommand{\bW}{\mathbf{W}}
 \DeclareMathOperator*{\softmax}{softmax}
 
-% DRAFT placeholder for numbers pending the post-training benchmark runs.
-% Every \pending{...} must be filled from the queued v5 experiments before
-% submission. Grep for "pending" to find them all.
-\newcommand{\pending}[1]{\textcolor{red}{[\,#1\,]}}
-
 % -----------------------------------------------------------------------
 \title{\textbf{UMA-Inverse: Ligand-Conditioned Protein Inverse Folding
        with a Distogram-Supervised Dense Pair Encoder}}
 
 \author{William Sobolewski\\
-        \textit{Yeh Laboratory, UC Santa Cruz}\\
         \texttt{wsobolew@ucsc.edu}}
 
 \date{\today}
@@ -47,48 +41,26 @@
 \begin{document}
 \maketitle
 
-% =======================================================================
-% DRAFT NOTICE (delete before submission)
-% =======================================================================
-% This draft describes UMA-Inverse as a single model. The earlier PairMixer
-% proof-of-concept (internally "v3") is NOT presented as a separate version;
-% its architecture is the starting point and all of its components appear here
-% as design choices of UMA-Inverse. Red [\,...\,] marks numbers awaiting the
-% queued post-training benchmark jobs (05h full-val, 05i interface recovery,
-% pocket-fixed, cofold, distal-KL, distogram-probe). See EXPERIMENTS.md.
-
 \begin{abstract}
-Designing protein sequences that bind specific ligands requires an inverse-folding model
-conditioned on full ligand geometry. We present \textbf{UMA-Inverse} (Unified Molecule-Aware Inverse
-folding), which replaces the sparse graph neural network backbone of LigandMPNN with a dense
-pair-representation encoder based on triangle multiplication---a geometric primitive from
-AlphaFold2 that captures three-body structural relationships. A six-block PairMixer encoder refines
-pairwise representations across all residue--residue and residue--ligand atom pairs; the encoder is
-additionally supervised by an auxiliary \emph{distogram} objective that predicts inter-residue
-geometry from the pair tensor, sharpening its structural representations. An autoregressive decoder
-conditions each prediction on structural context and previously decoded residues, attending over
-ligand atoms with a learned, position-specific readout of the pair tensor rather than a uniform
-average. UMA-Inverse also routes nucleic-acid chains into this ligand context to extend the approach
-toward DNA/RNA partners. Trained on a three-stage curriculum and the
-public LigandMPNN data split, UMA-Inverse reaches 66.1\% per-PDB teacher-forced sequence
-recovery (perplexity 2.57). On the standard interface recovery benchmark
-(10 autoregressive samples, $T{=}0.1$, 5\,{\AA} sidechain cutoff), it achieves 56.1\%/55.1\%/35.3\%
-(small-molecule/metal/nucleotide), trailing LigandMPNN re-run under the identical protocol by
-$\sim$4/9/18\,pp ($59.8$/$64.4$/$53.3$; LigandMPNN's \emph{published} $63.3$/$77.5$/$50.5$ are higher
-than we reproduce under this protocol). On small-molecule and metal the ligand conditioning helps---UMA-Inverse
-exceeds the ligand-agnostic ProteinMPNN baseline---but on nucleotide it falls \emph{below} it, a
-negative result: a nucleic acid is a macromolecule, not a compact cofactor, and a fixed-size
-ligand-atom context captures only a small fragment of it. In a pocket-fixed setting---holding the native
-binding pocket fixed while redesigning the rest of the protein---UMA-Inverse produces confidently
-folded, ligand-binding-competent redesigns (Boltz-2 ligand ipTM $\approx$0.96; ligand-pose RMSD within
-$\sim$0.6\,{\AA} of the native-sequence floor), though LigandMPNN remains modestly more accurate on
-both distal recovery and cofolded pose. The auxiliary distogram objective yields a pair representation
-that is 93.1\%\,top-1 accurate at recovering binned inter-residue distances, and a distance-shell
-analysis reveals a distinctive representational property: UMA-Inverse's dense encoder propagates
-ligand identity to residues far beyond the interface, where LigandMPNN's signal decays. This work
-establishes a compact, MSA-free, distogram-supervised dense pair encoder as a viable baseline for
-ligand-conditioned inverse folding---trailing LigandMPNN in accuracy---and characterizes its
-global propagation of ligand information.
+Designing protein sequences that bind specific ligands requires an inverse-folding model conditioned
+on full ligand geometry. We present \textbf{UMA-Inverse} (Unified Molecule-Aware Inverse folding),
+which replaces the sparse graph backbone of LigandMPNN with a dense pair-representation encoder: a
+six-block PairMixer (triangle multiplication, no triangle self-attention or sequence track) refines
+all residue--residue and residue--ligand atom pairs, supervised by an auxiliary \emph{distogram}
+objective, and an autoregressive decoder attends over ligand atoms through a learned, position-specific
+readout of the pair tensor. The model is compact ($\sim$3.3\,M parameters) and trains on a single
+commodity GPU. On the LigandMPNN test splits it reaches 56.1\%/55.1\%/35.3\% interface recovery
+(small-molecule/metal/nucleotide). It trails LigandMPNN, but by less than the published numbers
+suggest: re-run under our identical protocol, LigandMPNN scores $59.8$/$64.4$/$53.3$ (vs.\ published
+$63.3$/$77.5$/$50.5$). On small molecule and metal the ligand conditioning helps---UMA-Inverse exceeds
+the ligand-agnostic ProteinMPNN---but on nucleotide it falls \emph{below} ProteinMPNN, a negative
+result: a nucleic acid is a macromolecule, ill-suited to a fixed-size ligand-atom context. In a
+pocket-fixed setting the redesigns are confidently folded and ligand-binding-competent under Boltz-2
+cofolding, again modestly behind LigandMPNN. Its distinctive property is representational: the dense
+encoder propagates ligand identity to residues far beyond the interface, where LigandMPNN's signal
+decays. We offer UMA-Inverse as a compact, MSA-free baseline for ligand-conditioned inverse
+folding---trailing LigandMPNN in accuracy---and a characterization of how a dense all-pairs encoder
+distributes ligand information.
 \end{abstract}
 
 % -----------------------------------------------------------------------
@@ -220,8 +192,22 @@ the ligand context, exposing the model to real sidechain geometry during decodin
 \subsection{Model Architecture}
 \label{sec:arch}
 
-UMA-Inverse maps a protein--ligand backbone to per-residue amino acid logits via four stages:
-featurization, pair-tensor initialization, PairMixer encoding, and autoregressive decoding.
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{figures/fig1_architecture.pdf}
+  \caption{\textbf{UMA-Inverse architecture.} Backbone and ligand/nucleic-acid atoms are featurized
+    into node and pairwise (RBF distance) features; a six-block PairMixer encoder refines the pair
+    tensor $Z$ over all residue--residue and residue--ligand atom pairs. An auxiliary distogram head
+    supervises $Z$ during training, and an autoregressive decoder reads ligand context from $Z$ through
+    a learned, position-specific attention to emit the sequence. Each PairMixer block (bottom) applies
+    incoming and outgoing triangle multiplication and a pair-transition MLP with residual connections;
+    triangle self-attention is omitted.}
+  \label{fig:architecture}
+\end{figure}
+
+UMA-Inverse maps a protein--ligand backbone to per-residue amino acid logits via four stages
+(Fig.~\ref{fig:architecture}): featurization, pair-tensor initialization, PairMixer encoding, and
+autoregressive decoding.
 
 \paragraph{Featurization.}
 Each residue $i$ receives a 6-dimensional feature vector of the sine and cosine of the backbone
@@ -342,9 +328,6 @@ how far ligand identity propagates.
 \section{Results}
 \label{sec:results}
 
-% NOTE: all v5 numbers below are \pending{} until the queued benchmark jobs
-% complete (05h, 05i, pocket-fixed, cofold, distal-KL, distogram-probe).
-
 \subsection{Training convergence}
 \label{sec:results_training}
 
@@ -353,7 +336,7 @@ how far ligand identity propagates.
   \includegraphics[width=\linewidth]{figures/fig4_training.pdf}
   \caption{\textbf{Three-stage training curves.} Validation accuracy and loss across the curriculum;
     the auxiliary distogram top-1 accuracy is overlaid for Stage 3. The best checkpoint (dashed line)
-    is at epoch 11. \emph{[regenerate from v5 logs/csv]}}
+    is at epoch 11.}
   \label{fig:training}
 \end{figure}
 
@@ -463,7 +446,8 @@ Nucleotide     & 74  & 0.353 & 0.533 (0.505) & 0.471 \\
     ($N{=}104$). (b)~Boltz-2 cofold ligand-pose RMSD for the native sequence, UMA-Inverse, and
     LigandMPNN: both design methods sit near the native floor and are confidently folded (ligand
     ipTM $\approx$$0.96$), with LigandMPNN modestly closer to the native pose (paired Wilcoxon
-    $p{=}0.003$, $N{=}86$).}
+    $p{=}0.003$, $N{=}86$). Boltz-2 ipTM is a \emph{predicted} confidence, not a measurement; it is
+    used here only for relative comparison between methods on the same scaffolds.}
   \label{fig:pocket}
 \end{figure}
 
@@ -576,7 +560,10 @@ macromolecular representation} for nucleic acids---e.g.\ nucleotide-level tokens
 NA track---rather than forcing a polymer through a fixed-size compact-ligand atom context. Other
 extensions include flow-matching~\citep{lipman2022flow} in place of cross-entropy, full RDKit-derived
 ligand chemistry and bond topology (scaffolded but disabled in this model), and adding triangle
-self-attention to the pair encoder.
+self-attention to the pair encoder. On the data side, the training signal itself could be improved:
+better-stratified train/test splits, a larger and more recent PDB training set, and distillation from
+\emph{predicted} structures (using AlphaFold/Boltz-predicted protein--ligand complexes as additional
+supervision) would all expand coverage, particularly for the data-sparse nucleotide regime.
 
 % -----------------------------------------------------------------------
 \section{Conclusion}
@@ -601,7 +588,9 @@ training split is available at
 
 \paragraph{Acknowledgments.}
 Training compute was provided by the Yeh Laboratory at UC Santa Cruz.
-% [add advisor acknowledgment here]
+
+\paragraph{Competing interests.}
+The author declares no competing interests.
 
 % -----------------------------------------------------------------------
 \appendix
