@@ -48,6 +48,10 @@ BENCH_N="${BENCH_N:-1000}"
 BENCH_SEED="${BENCH_SEED:-0}"
 BENCH_TEMPS="${BENCH_TEMPS:-0.0,0.1,0.2}"
 BENCH_SAMPLES="${BENCH_SAMPLES:-3}"
+# Ligand ablation (re-eval with ligand features zeroed -> mean recovery delta).
+# Default skips it (faster); set BENCH_SKIP_ABLATION=0 to include it.
+BENCH_SKIP_ABLATION="${BENCH_SKIP_ABLATION:-1}"
+ABLATION_FLAG=""; [[ "$BENCH_SKIP_ABLATION" == "1" ]] && ABLATION_FLAG="--skip-ablation"
 
 [[ -f "$BENCH_CKPT" ]] || { echo "FATAL: checkpoint not found: $BENCH_CKPT" >&2; exit 1; }
 echo ">> v5 full benchmark: ckpt=$BENCH_CKPT  config=$BENCH_CONFIG  run=$BENCH_RUN_NAME  n=$BENCH_N  temps=$BENCH_TEMPS  ($(date))"
@@ -63,7 +67,7 @@ uv run uma-inverse benchmark \
     --seed "$BENCH_SEED" \
     --temperatures "$BENCH_TEMPS" \
     --samples-per-pdb "$BENCH_SAMPLES" \
-    --skip-ablation \
+    $ABLATION_FLAG \
     --max-total-nodes 5000 \
     -v
 

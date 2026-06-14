@@ -224,6 +224,12 @@ def _run_ligandmpnn_score(
 ) -> Path:
     """Invoke LigandMPNN's score.py once and return the path to the .pt output."""
     out_dir.mkdir(parents=True, exist_ok=True)
+    # score.py runs after `cd` into the LigandMPNN install dir, so any relative
+    # paths would resolve against that dir (not the project root) and fail. Make
+    # the PDB/output/checkpoint paths absolute before interpolating them.
+    pdb_path = pdb_path.resolve()
+    out_dir = out_dir.resolve()
+    ckpt = Path(ckpt).resolve()
     cmd_inner = (
         f"cd '{ligandmpnn_dir}' && "
         f"python score.py "

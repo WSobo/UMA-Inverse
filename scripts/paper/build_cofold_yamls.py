@@ -45,6 +45,33 @@ _STANDARD_AA = {
     "HID", "HIE", "HIP", "MSE",
 }
 
+# Three-letter -> one-letter, for extracting the native (crystal) sequence for the
+# native-baseline cofold arm. Keys mirror _STANDARD_AA (incl. protonation/MSE variants).
+_THREE_TO_ONE = {
+    "ALA": "A", "ARG": "R", "ASN": "N", "ASP": "D", "CYS": "C", "GLU": "E",
+    "GLN": "Q", "GLY": "G", "HIS": "H", "ILE": "I", "LEU": "L", "LYS": "K",
+    "MET": "M", "PHE": "F", "PRO": "P", "SER": "S", "THR": "T", "TRP": "W",
+    "TYR": "Y", "VAL": "V", "HID": "H", "HIE": "H", "HIP": "H", "MSE": "M",
+}
+
+
+def _native_chains(pdb_path: Path) -> list[tuple[str, str]]:
+    """Per-chain native (crystal) one-letter sequence, using the same residue
+    filter as _protein_chain_lengths so it aligns with the design chain split."""
+    from Bio.PDB import PDBParser
+    structure = PDBParser(QUIET=True).get_structure("s", str(pdb_path))
+    model = next(iter(structure))
+    chains: list[tuple[str, str]] = []
+    for chain in model:
+        seq = "".join(
+            _THREE_TO_ONE[r.get_resname().strip().upper()]
+            for r in chain
+            if r.get_id()[0] == " " and r.get_resname().strip().upper() in _STANDARD_AA
+        )
+        if seq:
+            chains.append((chain.get_id(), seq))
+    return chains
+
 
 def _resolve_pdb_path(pdb_dir: Path, pdb_id: str) -> Path | None:
     pid = pdb_id.lower()
@@ -186,6 +213,12 @@ def main() -> None:
         action="store_true",
         help="Skip emitting UMA YAMLs (e.g., when building LigandMPNN-only cofold inputs).",
     )
+    parser.add_argument(
+        "--include-native",
+        action="store_true",
+        help="Also emit one native-sequence YAML per PDB (the Boltz-2 reference "
+             "arm: cofold the crystal sequence to calibrate intrinsic error).",
+    )
     args = parser.parse_args()
 
     UMA_METHOD = args.uma_method_name
@@ -195,6 +228,8 @@ def main() -> None:
         (args.out_dir / UMA_METHOD).mkdir(exist_ok=True)
     if not args.skip_ligandmpnn:
         (args.out_dir / "ligandmpnn").mkdir(exist_ok=True)
+    if args.include_native:
+        (args.out_dir / "native").mkdir(exist_ok=True)
 
     rng = random.Random(args.seed)
     selection = json.loads(args.selection.read_text())
@@ -205,8 +240,8 @@ def main() -> None:
     for entry in selection["metal"]:
         pdbs.append((entry["pdb_id"], "metal", entry))
 
-    n_emitted = {UMA_METHOD: 0, "ligandmpnn": 0}
-    n_missing = {UMA_METHOD: 0, "ligandmpnn": 0}
+    n_emitted = {UMA_METHOD: 0, "ligandmpnn": 0, "native": 0}
+    n_missing = {UMA_METHOD: 0, "ligandmpnn": 0, "native": 0}
 
     sampling_record: list[dict] = []  # remember which sample indices we picked
 
@@ -274,6 +309,26 @@ def main() -> None:
             _emit(UMA_METHOD, _load_uma_designs(pdb_id, args.uma_dir))
         if not args.skip_ligandmpnn:
             _emit("ligandmpnn", _load_ligandmpnn_designs(pdb_id, args.ligandmpnn_dir))
+        if args.include_native:
+            nat = _native_chains(pdb_path)
+            if not nat:
+                logger.warning("%s: no native protein chains parsed -- skipping native", pdb_id)
+                n_missing["native"] += 1
+            else:
+                used_ids = {cid for cid, _ in nat}
+                ligand_id = next(c for c in "LBCDEFGHIJKMNOPQRSTUVWXYZ" if c not in used_ids)
+                nat_seq: str | list[tuple[str, str]] = nat[0][1] if len(nat) == 1 else nat
+                yaml_text = build_yaml(
+                    sequence=nat_seq, ligand_kind="ccd", ligand_value=ligand_value,
+                    ligand_id=ligand_id, affinity=True,
+                )
+                out_path = args.out_dir / "native" / f"{pdb_id}_native.yaml"
+                out_path.write_text(yaml_text)
+                n_emitted["native"] += 1
+                sampling_record.append({
+                    "pdb_id": pdb_id, "kind": kind, "method": "native",
+                    "sample_idx": -1, "yaml": str(out_path),
+                })
 
     # Persist the sampling record for downstream metric computation
     record_path = args.out_dir / "sampling_record.json"
@@ -286,6 +341,9 @@ def main() -> None:
     if not args.skip_ligandmpnn:
         print(f"LigandMPNN YAMLs:        {n_emitted['ligandmpnn']:>3d}   "
               f"(missing for {n_missing['ligandmpnn']} PDBs)")
+    if args.include_native:
+        print(f"Native YAMLs:            {n_emitted['native']:>3d}   "
+              f"(missing for {n_missing['native']} PDBs)")
     print(f"Total cofolds to run: {sum(n_emitted.values())}")
     print("\nLaunch cofolds with:")
     print("  sbatch scripts/SLURM/preprint_boltz_cofold.sh   (or _v3)")

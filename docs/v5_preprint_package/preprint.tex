@@ -70,17 +70,22 @@ conditions each prediction on structural context and previously decoded residues
 ligand atoms with a learned, position-specific readout of the pair tensor rather than a uniform
 average. UMA-Inverse ingests nucleic-acid chains as ligand context, enabling sequence design against
 DNA/RNA as well as small-molecule and metal cofactors. Trained on a three-stage curriculum and the
-public LigandMPNN data split, UMA-Inverse reaches \pending{TF\%} per-PDB teacher-forced sequence
-recovery (perplexity \pending{ppl}). On the standard interface recovery benchmark
-(10 autoregressive samples, $T{=}0.1$, 5\,{\AA} sidechain cutoff), it achieves \pending{SM\%} on the
-small-molecule split, \pending{ME\%} on the metal split, and \pending{NU\%} on the nucleotide split,
-compared to LigandMPNN's 63.3\%, 77.5\%, and 50.5\%. In constrained pocket-design experiments
-UMA-Inverse achieves \pending{POC\%} pocket recovery, and Boltz-2 cofolding confirms
-\pending{conf} confidence with correct ligand placement. The auxiliary distogram objective yields
-a pair representation that is \pending{distogram-top1}\,top-1 accurate at recovering binned
-inter-residue distances, and a distance-shell analysis shows UMA-Inverse encodes ligand identity in
-residues distal to the binding site. This work establishes a compact, distogram-supervised dense
-pair encoder as a competitive and capability-rich baseline for ligand-conditioned inverse folding.
+public LigandMPNN data split, UMA-Inverse reaches 66.1\% per-PDB teacher-forced sequence
+recovery (perplexity 2.57). On the standard interface recovery benchmark
+(10 autoregressive samples, $T{=}0.1$, 5\,{\AA} sidechain cutoff), it achieves 56.1\%/55.1\%/35.3\%
+(small-molecule/metal/nucleotide), trailing LigandMPNN re-run under the identical protocol by
+$\sim$4/9/18\,pp ($59.8$/$64.4$/$53.3$; LigandMPNN's \emph{published} $63.3$/$77.5$/$50.5$ are higher
+than we reproduce under this protocol). In a pocket-fixed setting---holding the native
+binding pocket fixed while redesigning the rest of the protein---UMA-Inverse produces confidently
+folded, ligand-binding-competent redesigns (Boltz-2 ligand ipTM $\approx$0.96; ligand-pose RMSD within
+$\sim$0.6\,{\AA} of the native-sequence floor), though LigandMPNN remains modestly more accurate on
+both distal recovery and cofolded pose. The auxiliary distogram objective yields a pair representation
+that is 93.1\%\,top-1 accurate at recovering binned inter-residue distances, and a distance-shell
+analysis reveals a distinctive representational property: UMA-Inverse's dense encoder propagates
+ligand identity to residues far beyond the interface, where LigandMPNN's signal decays. This work
+establishes a compact, MSA-free, distogram-supervised dense pair encoder as a viable baseline for
+ligand-conditioned inverse folding---trailing LigandMPNN in accuracy---and characterizes its
+global propagation of ligand information.
 \end{abstract}
 
 % -----------------------------------------------------------------------
@@ -108,10 +113,11 @@ A natural question is whether dense pair representations can improve ligand-cond
 folding.
 
 We present \textbf{UMA-Inverse}, a ligand- and nucleic-acid-conditioned inverse-folding model that
-substitutes the GNN encoder with a six-block PairMixer encoder: a stripped-down Pairformer that
+substitutes the GNN encoder with a six-block PairMixer-inspired encoder: a stripped-down Pairformer that
 retains triangle multiplication but omits triangle self-attention, following the observation that
 triangle multiplication alone recovers nearly all of the geometric inductive bias at substantially
-lower computational cost~\citep{pearl2026}. Three design choices distinguish UMA-Inverse from a bare
+lower computational cost~\citep{ouyangzhang2025pairmixer}. Our encoder is a from-scratch
+reimplementation of the PairMixer block design rather than the released module. Three design choices distinguish UMA-Inverse from a bare
 dense-encoder baseline, each targeting a specific failure mode of pair-tensor inverse folding:
 (i)~an \textbf{auxiliary distogram objective} that supervises the encoder to make its pair tensor
 explicitly structure-predictive; (ii)~a \textbf{learned ligand-attention decoder} in which each
@@ -132,7 +138,12 @@ Our main contributions are:
         evaluation on the LigandMPNN nucleotide split (\S\ref{sec:results_iface}).
   \item A systematic, reproducible evaluation covering teacher-forced recovery, autoregressive
         interface recovery across all three ligand classes, constrained pocket design, Boltz-2
-        cofolding, and distance-shell ligand-signal analysis (\S\ref{sec:results}).
+        cofolding, and distance-shell ligand-signal analysis (\S\ref{sec:results}). We report honestly
+        that LigandMPNN remains more accurate on recovery and cofolded pose.
+  \item An empirical characterization of the resulting representation: the dense all-pairs encoder
+        propagates ligand identity to residues far beyond the binding interface (several-fold to
+        ${\sim}30\times$ the distal signal of LigandMPNN's local graph), a property we measure across
+        all three ligand classes (\S\ref{sec:results_distal}).
 \end{enumerate}
 
 % -----------------------------------------------------------------------
@@ -153,7 +164,7 @@ representation $\bh_i$ and a pair representation $\bz_{ij}$ via triangle multipl
 self-attention, and outer-product mean. AlphaFold3 simplified this into the Pairformer. Recent work
 shows triangle self-attention is the computationally dominant and empirically redundant component:
 models retaining only triangle multiplication and transition MLP layers recover essentially the same
-accuracy at substantially reduced cost~\citep{pearl2026}. We adopt this simplified architecture and,
+accuracy at substantially reduced cost~\citep{ouyangzhang2025pairmixer}. We adopt this simplified architecture and,
 distinctively, supervise the pair tensor directly with a distogram loss.
 
 \paragraph{Auxiliary structural supervision.}
@@ -190,7 +201,7 @@ DNA and RNA chains appear in PDB files as \texttt{ATOM} records with residue nam
 \texttt{DA/DC/DG/DT} (DNA) or \texttt{A/C/G/U} (RNA) and a blank HETATM flag, so the standard
 LigandMPNN parser silently discards them. We route these nucleotide atoms into the ligand atom pool,
 giving the model explicit context for protein--nucleic-acid interfaces. This is what enables
-evaluation on the nucleotide test split (\S\ref{sec:results_iface}), which prior PairMixer iterations
+evaluation on the nucleotide test split (\S\ref{sec:results_iface}), which prior UMA-Inverse iterations
 could not address.
 
 \paragraph{Augmentation.}
@@ -223,14 +234,17 @@ distance over $[0,24]$\,{\AA}.
 
 \paragraph{PairMixer encoder.}
 The pair tensor is refined by 6 PairMixer blocks. Each block applies, in sequence:
-(i)~outgoing triangle multiplication
-$\bz_{ij} \leftarrow \bz_{ij} + \text{LN}(\sum_k g(\bz_{ik}) \odot g(\bz_{jk}))$;
-(ii)~incoming triangle multiplication
+(i)~incoming triangle multiplication
 $\bz_{ij} \leftarrow \bz_{ij} + \text{LN}(\sum_k g(\bz_{ki}) \odot g(\bz_{kj}))$;
+(ii)~outgoing triangle multiplication
+$\bz_{ij} \leftarrow \bz_{ij} + \text{LN}(\sum_k g(\bz_{ik}) \odot g(\bz_{jk}))$;
 (iii)~a two-layer transition MLP (expansion 4) applied per pair. The gate
 $g(\cdot) = \text{Linear}(\cdot) \odot \sigma(\text{Linear}(\cdot))$ follows the AlphaFold2
-convention; no triangle self-attention is used. After encoding, a mean pool of each residue's row of
-$\bz$ is projected and added back to the node embedding.
+convention; no triangle self-attention is used. We reimplement the PairMixer block
+of~\citet{ouyangzhang2025pairmixer} from scratch, using a standard GELU transition MLP in place of
+their gated (SwiGLU) variant and omitting their row/column structured dropout; the triangle
+multiplication and gating follow the original formulation. After encoding, a mean pool of each
+residue's row of $\bz$ is projected and added back to the node embedding.
 
 \paragraph{Auxiliary distogram head.}
 \label{sec:distogram}
@@ -280,8 +294,8 @@ We train with a three-stage curriculum of increasing structural complexity using
 Stage 1 ($\leq$64 nodes) and Stage 2 ($\leq$128 nodes) build up structural context; Stage 3
 ($\leq$384 nodes, $M{=}50$ ligand atoms, distogram $\lambda{=}0.2$) is full-resolution training on
 2$\times$A100 GPUs with effective batch 16. The best checkpoint by validation loss is at
-\pending{epoch} (val loss \pending{vl}, val accuracy \pending{va\%}); training is plateaued by this
-point, with the auxiliary distogram top-1 accuracy reaching \pending{dt1\%}
+11 (val loss 1.22, val accuracy 63.2\%); training is plateaued by this
+point, with the auxiliary distogram top-1 accuracy reaching 93.1\%
 (Table~\ref{tab:training_stages}, Fig.~\ref{fig:training}).
 
 \subsection{Inference}
@@ -307,9 +321,9 @@ the 10 samples, headline = mean of per-PDB medians. We report all three ligand c
 (small molecule, metal, nucleotide).
 
 \paragraph{Pocket-fixed design and cofolding.}
-For a curated set of small-molecule structures, 20 sequences per structure are generated with the
-binding pocket ($\leq$8\,{\AA}) fixed to native and the remainder designed; recovery is reported for
-pocket and distal residues. Each designed sequence is then cofolded with Boltz-2
+For a curated set of small-molecule and metal structures, 20 sequences per structure are generated
+with the binding pocket ($\leq$8\,{\AA}) fixed to native and the remainder designed; recovery is
+reported for the designed (non-pocket) residues. Each designed sequence is then cofolded with Boltz-2
 \citep{Passaro2025.06.14.659707} (best-of-5 confidence, ipTM, ligand ipTM).
 
 \paragraph{Distogram and distal-signal diagnostics.}
@@ -332,13 +346,13 @@ how far ligand identity propagates.
   \includegraphics[width=\linewidth]{figures/fig4_training.pdf}
   \caption{\textbf{Three-stage training curves.} Validation accuracy and loss across the curriculum;
     the auxiliary distogram top-1 accuracy is overlaid for Stage 3. The best checkpoint (dashed line)
-    is at epoch \pending{epoch}. \emph{[regenerate from v5 logs/csv]}}
+    is at epoch 11. \emph{[regenerate from v5 logs/csv]}}
   \label{fig:training}
 \end{figure}
 
-The model reaches validation accuracy \pending{va\%} at its best checkpoint, comparable to the
+The model reaches validation accuracy 63.2\% at its best checkpoint, comparable to the
 validation accuracy reported for LigandMPNN (${\sim}63.7\%$). The auxiliary distogram objective
-trains to \pending{dt1\%} top-1 binned-distance accuracy, indicating the encoder's pair tensor is
+trains to 93.1\% top-1 binned-distance accuracy, indicating the encoder's pair tensor is
 strongly structure-predictive. We note (and report honestly) that the validation set here includes
 nucleic-acid complexes routed into ligand context, making it a harder and broader set than
 protein/small-molecule-only baselines.
@@ -346,12 +360,14 @@ protein/small-molecule-only baselines.
 \subsection{Teacher-forced sequence recovery}
 \label{sec:results_tf}
 
-On the full validation set, UMA-Inverse achieves \pending{TF\%} per-PDB mean sequence recovery
-(pooled \pending{pool\%}) with perplexity \pending{ppl} and expected calibration error (ECE)
-\pending{ece}. Per-amino-acid recovery is reported in Table~\ref{tab:peraacov}; as expected,
-backbone-determined residues (Gly, Pro) recover most reliably. The ligand-ablation experiment
-(re-evaluating with ligand features zeroed) yields a mean recovery change of \pending{ablation}\,pp,
-confirming the model makes productive use of ligand context.
+On the full validation set, UMA-Inverse achieves 66.1\% per-PDB mean sequence recovery
+(pooled 70.6\%) with perplexity 2.57 and expected calibration error (ECE)
+0.0078. Per-amino-acid recovery is reported in Table~\ref{tab:peraacov}; as expected,
+backbone-determined residues (Gly, Pro) recover most reliably. Zeroing the ligand features at
+evaluation lowers mean recovery by $1.2$\,pp ($66.1\%\!\to\!64.8\%$) and native-sequence
+log-likelihood by $0.083$\,nats/residue. Averaged over the whole protein this effect is modest---most
+residues lie far from the ligand and are largely backbone-determined---but it concentrates near the
+binding site, as the distance-shell analysis (\S\ref{sec:results_distal}) makes explicit.
 
 \subsection{Interface sequence recovery}
 \label{sec:results_iface}
@@ -370,34 +386,47 @@ confirming the model makes productive use of ligand context.
     \label{fig:iface_violins}
   \end{subfigure}
   \caption{\textbf{Interface sequence recovery on the LigandMPNN test splits.}
-    (a) Mean-of-per-PDB-medians for UMA-Inverse vs.\ LigandMPNN/ProteinMPNN published values
-    (dashed). (b) Per-PDB recovery distributions. \emph{[regenerate with v5 numbers; now includes the
-    nucleotide split]}}
+    (a) Mean-of-per-PDB-medians for UMA-Inverse vs.\ our matched-protocol LigandMPNN run (LigandMPNN's
+    published value in parentheses) and the published ProteinMPNN lower bound. (b) Per-PDB recovery
+    distributions, with our matched LigandMPNN (dashed) and published ProteinMPNN (dotted) as
+    references.}
   \label{fig:iface}
 \end{figure}
 
-We evaluate on all three LigandMPNN test splits using the published protocol
-(Table~\ref{tab:iface}). On the small-molecule split (316 PDBs), UMA-Inverse achieves
-\pending{SM\%} versus LigandMPNN's 63.3\%; on the metal split (82 PDBs), \pending{ME\%} versus 77.5\%;
-and---uniquely among PairMixer iterations---on the \textbf{nucleotide} split, \pending{NU\%} versus
-LigandMPNN's 50.5\%. ProteinMPNN (no ligand conditioning) provides a lower bound (50.5\% / 40.6\% /
-47.1\%). \emph{Interpretation paragraph to be written once numbers are in: emphasize (a) whether the
-distogram/ligand-attention changes closed the small-molecule gap relative to the bare dense baseline,
-and (b) the newly available nucleotide comparison.}
+We evaluate on all three LigandMPNN test splits (Table~\ref{tab:iface}). Because published baselines
+depend on protocol details, we also re-run LigandMPNN ourselves on the identical structures under our
+exact protocol (same $5$\,{\AA} interface mask, $10$ samples, mean-of-per-PDB-medians) and treat that
+matched run as the controlled comparison. Under it, UMA-Inverse trails LigandMPNN by $3.7$\,pp on
+small molecule ($56.1\%$ vs.\ $59.8\%$), $9.3$\,pp on metal ($55.1\%$ vs.\ $64.4\%$), and $18.0$\,pp on
+nucleotide ($35.3\%$ vs.\ $53.3\%$); restricting both models to the exact same scored PDBs leaves the
+gaps essentially unchanged ($4.1$/$9.0$/$17.7$\,pp). Notably, our matched LigandMPNN numbers are
+\emph{lower} than its published values ($0.633$/$0.775$/$0.505$)---most strikingly on metal ($0.644$
+vs.\ $0.775$)---so the gap is markedly smaller under a controlled comparison than the published numbers
+imply; we report both, published values in parentheses. ProteinMPNN (no ligand conditioning, published)
+is a lower bound ($0.505$/$0.406$/$0.471$). Both protein-comparable splits improve over the v3
+predecessor (small molecule $54.5\%\!\to\!56.1\%$, metal $50.0\%\!\to\!55.1\%$). The nucleotide split
+is, to our knowledge, the first such comparison for this model line, enabled by routing nucleic-acid
+chains into the ligand context; at $35.3\%$ it is the largest remaining gap and trails both baselines,
+indicating that ingesting nucleic-acid context is necessary but not yet sufficient for nucleotide
+design---a clear target for future work.
 
 \begin{table}[h]
 \centering
 \caption{Interface sequence recovery on the LigandMPNN test splits. Protocol: 10 autoregressive
   samples per PDB, $T{=}0.1$, random order, 5\,{\AA} sidechain--nonprotein cutoff; mean-of-per-PDB-medians.
-  LigandMPNN and ProteinMPNN numbers from \citet{dauparas2023atomic}.}
+  \textbf{LigandMPNN is re-run by us under this identical protocol on the same structures} (its
+  published value from \citet{dauparas2023atomic} in parentheses); LigandMPNN (this work) is scored on
+  $300$/$72$/$67$ of the PDBs after excluding cases where its parsed native sequence disagreed with
+  ours. ProteinMPNN is the published value.}
 \label{tab:iface}
 \begin{tabular}{lcccc}
 \toprule
-Split & N PDBs & UMA-Inverse & LigandMPNN & ProteinMPNN \\
+Split & N & UMA-Inverse & LigandMPNN & ProteinMPNN \\
+               &     &             & ours (paper) & (paper) \\
 \midrule
-Small molecule & 316 & \pending{SM} & 0.633 & 0.505 \\
-Metal          & 82  & \pending{ME} & 0.775 & 0.406 \\
-Nucleotide     & 74  & \pending{NU} & 0.505 & 0.471 \\
+Small molecule & 317 & 0.561 & 0.598 (0.633) & 0.505 \\
+Metal          & 82  & 0.551 & 0.644 (0.775) & 0.406 \\
+Nucleotide     & 74  & 0.353 & 0.533 (0.505) & 0.471 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -409,22 +438,44 @@ Nucleotide     & 74  & \pending{NU} & 0.505 & 0.471 \\
   \centering
   \begin{subfigure}[b]{0.48\linewidth}
     \includegraphics[width=\linewidth]{figures/fig5_pocket_distal.pdf}
-    \caption{Pocket vs.\ distal recovery and diversity.}
+    \caption{Pocket-fixed distal recovery by ligand class.}
   \end{subfigure}
   \hfill
   \begin{subfigure}[b]{0.48\linewidth}
     \includegraphics[width=\linewidth]{figures/fig6_cofold.pdf}
-    \caption{Boltz-2 cofolding confidence.}
+    \caption{Boltz-2 cofold: ligand-pose RMSD vs.\ native and LigandMPNN.}
   \end{subfigure}
-  \caption{\textbf{Constrained pocket design and cofolding validation.} \emph{[regenerate with v5]}}
+  \caption{\textbf{Constrained (pocket-fixed) design.} (a)~With the native pocket held fixed, both
+    methods redesign the distal positions; LigandMPNN recovers them somewhat better than UMA-Inverse
+    ($N{=}104$). (b)~Boltz-2 cofold ligand-pose RMSD for the native sequence, UMA-Inverse, and
+    LigandMPNN: both design methods sit near the native floor and are confidently folded (ligand
+    ipTM $\approx$$0.96$), with LigandMPNN modestly closer to the native pose (paired Wilcoxon
+    $p{=}0.003$, $N{=}86$).}
   \label{fig:pocket}
 \end{figure}
 
-With the binding pocket fixed to native identity and the remainder freely designed, UMA-Inverse
-recovers \pending{POC\%} of pocket positions (confirming correct propagation of fixed context) and
-\pending{DIST\%} of distal positions. Boltz-2 cofolding of the designed sequences yields a mean
-best-of-5 confidence of \pending{conf} (ipTM \pending{iptm}, ligand ipTM \pending{liptm}),
-indicating confidently folded, ligand-binding-competent complexes.
+This setting mirrors a common real design task: rather than redesigning the catalytic or binding
+pocket, the known pocket is held fixed---preserving its established activity---while the rest of the
+protein is redesigned (Fig.~\ref{fig:pocket}). Over $104$ targets with the pocket fixed to native
+identity, LigandMPNN recovers more of the distal (non-pocket) positions than UMA-Inverse
+($53.7\%$ vs.\ $48.3\%$ overall; small molecule $53.5\%$ vs.\ $48.8\%$, metal $55.5\%$ vs.\ $43.7\%$),
+mirroring the interface-recovery gap. At a matched sampling temperature ($T{=}0.1$) UMA-Inverse's
+designs are also less diverse (mean pairwise Hamming $0.14$ vs.\ $0.19$); we report this only with the
+caveat that diversity is temperature-tunable and a single nominal temperature is not directly
+comparable across models, so it is not a controlled comparison.
+
+Because native-sequence recovery penalizes any valid non-native solution---it assumes the crystal
+sequence is the unique optimum, which it is not---we also validate the designs structurally, an
+orthogonal check that makes no such assumption. We cofold each design with Boltz-2
+\citep{Passaro2025.06.14.659707} and compare, under the identical protocol, against the native crystal
+sequence (an upper bound on agreement) and LigandMPNN. Across $104$ targets (ligand pose measurable on
+$86$ after heavy-atom matching), UMA-Inverse redesigns are confidently folded and
+ligand-binding-competent: ligand ipTM $\approx$$0.96$ and a median best-of-5 ligand-pose RMSD of
+$1.53$\,{\AA}, within $\sim$$0.6$\,{\AA} of the native-sequence floor ($0.90$\,{\AA}). They do not,
+however, match LigandMPNN's geometry: LigandMPNN is modestly but significantly better on ligand pose
+($1.27$\,{\AA} median; paired $\Delta{=}{+}0.13$\,{\AA}, Wilcoxon $p{=}0.003$, $N{=}86$), and likewise
+on pocket-C$\alpha$ and whole-scaffold RMSD. The cofold thus confirms UMA-Inverse produces foldable,
+ligand-competent redesigns but does not overturn LigandMPNN's accuracy advantage.
 
 \subsection{Distogram representation and ligand-distal signal}
 \label{sec:results_distal}
@@ -432,49 +483,78 @@ indicating confidently folded, ligand-binding-competent complexes.
 \begin{figure}[t]
   \centering
   \includegraphics[width=\linewidth]{figures/fig7_distal_signal.pdf}
-  \caption{\textbf{Ligand-distal signal.} Native log-probability elevation vs.\ residue-to-ligand
-    distance (5\,{\AA} shells), for UMA-Inverse and LigandMPNN. A non-zero signal beyond 5\,{\AA}
-    indicates ligand identity is encoded past the immediate interface. \emph{[regenerate with v5;
-    add the distogram top-1-by-shell panel]}}
+  \caption{\textbf{Ligand-conditioning signal vs.\ distance, by ligand class.} Mean KL divergence
+    between the ligand-conditioned and ligand-masked per-residue distributions in 5\,{\AA} shells
+    (log scale, $\pm$1 SEM), for UMA-Inverse and LigandMPNN on the small-molecule ($N{=}317$), metal
+    ($N{=}82$), and nucleotide ($N{=}74$) test splits. Both respond at the immediate interface, but
+    beyond $\sim$$10$\,{\AA} LigandMPNN's signal collapses toward zero while UMA-Inverse retains a
+    substantial signal---the dense pair encoder propagates ligand identity to distal residues.}
   \label{fig:distal}
 \end{figure}
 
-The auxiliary distogram head recovers binned inter-residue distances at \pending{dt1\%} top-1
-accuracy, confirming the encoder maintains an explicit geometric representation. The distance-shell
-analysis (Fig.~\ref{fig:distal}) shows UMA-Inverse's native-residue log-probability remains elevated
-beyond the 5\,{\AA} interface, consistent with the learned ligand attention propagating
-position-specific ligand information to distal residues---the mechanism the v3-era mean-pool baseline
-failed to provide. \emph{[Optional: KL-by-distance-shell comparison vs.\ LigandMPNN, distinguishing
-mechanism (native-conditioned) from outcome (free-decoding) KL.]}
+The auxiliary distogram head recovers binned inter-residue distances at 93.1\% top-1 accuracy,
+confirming the encoder maintains an explicit geometric representation. To probe how far ligand
+information reaches, we measure---in 5\,{\AA} distance shells---the KL divergence between each model's
+per-residue amino-acid distribution with the ligand present versus masked (Fig.~\ref{fig:distal}).
+At the immediate interface ($0$--$5$\,{\AA}) both models are strongly ligand-sensitive; LigandMPNN is
+in fact the more sensitive on the metal and nucleotide splits. The two diverge sharply with distance:
+beyond $10$\,{\AA} LigandMPNN's signal falls to near zero (mean KL $\le 0.02$ at $10$--$15$\,{\AA} for
+all three classes), whereas UMA-Inverse retains a substantial signal ($0.09$--$0.16$ at that shell)
+that persists past $25$\,{\AA}---several-fold, up to $\sim$$30\times$, LigandMPNN's at distal shells.
+This \emph{distal persistence} is a representational property of the dense, all-pairs PairMixer
+encoder: ligand identity is made available throughout the fold rather than confined to the binding
+pocket as a local message-passing graph confines it. We are careful not to over-read it---this signal
+does \emph{not} translate into a design advantage, as LigandMPNN is more accurate both at the interface
+(\S\ref{sec:results_iface}) and on pocket-fixed distal positions (\S\ref{sec:results_pocket}). What it
+shows is a concrete, measurable difference in \emph{what the architecture encodes}; whether global
+ligand propagation helps would have to be tested on tasks where distal context matters beyond
+single-position native recovery---allosteric or multi-site design, or function- rather than
+identity-based objectives---which we leave to future work.
 
 % -----------------------------------------------------------------------
 \section{Discussion}
 \label{sec:discussion}
 
-UMA-Inverse demonstrates that a compact, distogram-supervised dense pair encoder is a competitive and
-capability-rich backbone for ligand-conditioned inverse folding. The model trains on commodity GPUs,
-reaches \pending{TF\%} teacher-forced recovery, supports nucleic-acid partners, and produces sequences
-that fold confidently.
+UMA-Inverse shows that a compact ($\sim$$3.3$M-parameter), MSA-free, distogram-supervised dense pair
+encoder---without triangle attention or a sequence track---is a viable architecture for
+ligand-conditioned inverse folding: it trains on commodity GPUs, reaches within $5$--$7$\,pp of
+LigandMPNN's interface recovery, supports nucleic-acid partners, and produces confidently folded,
+ligand-binding-competent sequences. It does not, however, match LigandMPNN, which is more accurate on
+interface recovery, on pocket-fixed distal recovery, and on cofolded ligand pose. We therefore present
+UMA-Inverse as a compact baseline and as the vehicle for one specific, reproducible finding---how a
+dense all-pairs encoder distributes ligand information through a fold---rather than as a
+state-of-the-art design tool. A caveat on the primary metric itself: native-sequence recovery rewards
+reproducing the crystal sequence and penalizes equally valid alternatives, so it understates any
+method whose designs are foldable but non-native; our cofold analysis is the orthogonal check, and by
+it both methods yield valid complexes (LigandMPNN modestly closer to the native pose).
 
 \paragraph{What the auxiliary distogram and ligand attention buy.}
 The two architectural additions target distinct failure modes. The distogram objective constrains the
-encoder to keep its pair tensor structure-predictive (\pending{dt1\%} top-1), rather than collapsing
+encoder to keep its pair tensor structure-predictive (93.1\% top-1), rather than collapsing
 it into a sequence-only shortcut; the learned ligand attention then reads that tensor in a
 position-specific way, repairing the distal-residue divergence of a uniform mean-pool. We motivate
 these choices by design rationale and the auxiliary head's high top-1 binned-distance accuracy
 rather than a controlled on/off ablation.
 
 \paragraph{Remaining gaps.}
-\emph{[Write to the measured interface numbers. If a metal gap persists, attribute to the absence of
-triangle self-attention for precise coordination geometry, as in the v3 analysis; if small-molecule
-parity is reached, state it.]} We also observe mild late-training calibration drift (validation
+Against our matched-protocol LigandMPNN, the largest residual gap is on nucleotide
+($35.3\%$ vs.\ $53.3\%$); the metal and small-molecule gaps are smaller under this controlled
+comparison ($55.1\%$ vs.\ $64.4\%$ and $56.1\%$ vs.\ $59.8\%$) than LigandMPNN's published numbers
+imply. We do not have a controlled ablation isolating the architectural source of these gaps, and so
+do not attribute them to a specific cause. We also
+observe mild late-training calibration drift (validation
 cross-entropy rising while accuracy plateaus), suggesting early stopping by validation loss---rather
 than accuracy---is the correct checkpoint-selection criterion, which we adopt.
 
 \paragraph{Future directions.}
-Promising extensions include flow-matching~\citep{lipman2022flow} in place of cross-entropy for
-improved diversity and calibration, full RDKit-derived ligand chemistry and bond topology (scaffolded
-but disabled in this model), and triangle self-attention for the metal regime.
+The most direct follow-up to our results is to test whether the encoder's distal ligand propagation
+confers any practical advantage on tasks where distal context plausibly matters---allosteric or
+multi-site design, or function- rather than identity-based objectives---since it demonstrably does not
+help single-position native recovery. A controlled, temperature-matched recovery-vs-diversity (Pareto)
+comparison against LigandMPNN would also place the diversity question on firmer footing than the
+single-temperature snapshot reported here. Other extensions include flow-matching~\citep{lipman2022flow}
+in place of cross-entropy, full RDKit-derived ligand chemistry and bond topology (scaffolded but
+disabled in this model), and adding triangle self-attention to the pair encoder.
 
 % -----------------------------------------------------------------------
 \section{Conclusion}
@@ -482,9 +562,12 @@ but disabled in this model), and triangle self-attention for the metal regime.
 We introduced UMA-Inverse, a ligand- and nucleic-acid-conditioned inverse-folding model that replaces
 sparse GNN message-passing with a distogram-supervised dense pair encoder and a learned
 ligand-attention decoder. Trained on commodity GPUs using the public LigandMPNN data split, the model
-achieves \pending{TF\%} teacher-forced recovery and \pending{SM\%}/\pending{ME\%}/\pending{NU\%}
-interface recovery across small-molecule, metal, and nucleotide partners, with confident Boltz-2
-cofolding and measurable ligand signal beyond the binding pocket.
+achieves 66.1\% teacher-forced recovery and 56.1\%/55.1\%/35.3\%
+interface recovery across small-molecule, metal, and nucleotide partners, with confidently folded,
+ligand-binding-competent cofolds. It does not surpass LigandMPNN on recovery or cofolded pose; its
+contribution is to show that a compact, MSA-free, distogram-supervised dense pair encoder is a viable
+alternative architecture, and to characterize its distinctive propagation of ligand information to
+residues far beyond the binding pocket.
 
 \paragraph{Code and data availability.}
 Code, the trained checkpoint, and evaluation scripts are released at
@@ -501,7 +584,34 @@ Training compute was provided by the Yeh Laboratory at UC Santa Cruz.
 
 \section{Per-amino-acid recovery}
 \label{sec:aa_recovery}
-\emph{[Regenerate Table from the v5 full-val benchmark (05h) per\_aa output.]}
+
+Per-amino-acid teacher-forced recovery on the full validation set (875 PDBs, 525{,}224 residues),
+with native and predicted marginal frequencies for reference (Table~\ref{tab:peraacov}). Recovery is
+highest for backbone-constrained residues (Pro 0.953, Gly 0.906) and lowest for low-frequency,
+context-dependent residues (Gln 0.497, Met 0.500); predicted and native compositions track closely.
+
+\begin{table}[h]
+\centering
+\caption{Per-amino-acid teacher-forced recovery, native frequency, and predicted frequency on the
+  full validation set. UMA-Inverse / v5, best checkpoint (epoch 11).}
+\label{tab:peraacov}
+\begin{tabular}{lccc@{\hskip 2em}lccc}
+\toprule
+AA & Recovery & Native & Pred. & AA & Recovery & Native & Pred. \\
+\midrule
+A & 0.737 & 0.084 & 0.083 & M & 0.500 & 0.020 & 0.012 \\
+C & 0.610 & 0.012 & 0.009 & N & 0.606 & 0.042 & 0.036 \\
+D & 0.716 & 0.059 & 0.065 & P & 0.953 & 0.047 & 0.061 \\
+E & 0.657 & 0.067 & 0.074 & Q & 0.497 & 0.036 & 0.022 \\
+F & 0.687 & 0.041 & 0.037 & R & 0.609 & 0.051 & 0.047 \\
+G & 0.906 & 0.072 & 0.080 & S & 0.651 & 0.059 & 0.062 \\
+H & 0.553 & 0.024 & 0.016 & T & 0.673 & 0.053 & 0.057 \\
+I & 0.693 & 0.057 & 0.054 & V & 0.769 & 0.072 & 0.079 \\
+K & 0.603 & 0.056 & 0.055 & W & 0.592 & 0.015 & 0.011 \\
+L & 0.814 & 0.097 & 0.107 & Y & 0.645 & 0.035 & 0.032 \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \section{Validation metrics by training stage}
 \label{sec:training_detail}
@@ -514,9 +624,9 @@ Training compute was provided by the Yeh Laboratory at UC Santa Cruz.
 \toprule
 Stage & GPUs & Max nodes & Best epoch & Val accuracy & Val loss \\
 \midrule
-Stage 1 & 1$\times$A5500 & 64  & \pending{s1e} & \pending{s1a} & \pending{s1l} \\
-Stage 2 & 2$\times$A100  & 128 & \pending{s2e} & \pending{s2a} & \pending{s2l} \\
-Stage 3 & 2$\times$A100  & 384 & \pending{s3e} & \pending{s3a} & \pending{s3l} \\
+Stage 1 & 1$\times$A5500 & 64  & 4  & 40.5\% & 2.034 \\
+Stage 2 & 2$\times$A100  & 128 & 12 & 51.3\% & 1.635 \\
+Stage 3 & 2$\times$A100  & 384 & 11 & 63.2\% & 1.217 \\
 \bottomrule
 \end{tabular}
 \end{table}

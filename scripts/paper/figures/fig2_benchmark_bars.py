@@ -30,8 +30,11 @@ import numpy as np
 # Paper numbers from Dauparas et al. (LigandMPNN paper) — they report MEDIAN
 # of per-PDB recoveries; we report MEAN-of-per-PDB-medians for UMA. The chart
 # caption notes the convention difference.
-LIGANDMPNN_REF = {"metal": 0.775, "small_molecule": 0.633, "nucleotide": 0.505}
-PROTEINMPNN_REF = {"metal": 0.406, "small_molecule": 0.505, "nucleotide": 0.340}
+# LigandMPNN scored under our identical protocol (same PDBs / mask / metric as
+# UMA); published values from Dauparas et al. shown in parentheses for reference.
+LIGANDMPNN_OURS = {"metal": 0.644, "small_molecule": 0.598, "nucleotide": 0.533}
+LIGANDMPNN_PAPER = {"metal": 0.775, "small_molecule": 0.633, "nucleotide": 0.505}
+PROTEINMPNN_REF = {"metal": 0.406, "small_molecule": 0.505, "nucleotide": 0.471}
 
 
 def _load_pdb_medians(csv_path: Path) -> list[float]:
@@ -68,15 +71,15 @@ def main() -> None:
     splits = ("metal", "small_molecule", "nucleotide")
     fig, axes = plt.subplots(1, 3, figsize=(10, 4), sharey=True)
 
-    methods = ("UMA-Inverse-1", "LigandMPNN", "ProteinMPNN")
+    methods = ("UMA-Inverse", "LigandMPNN", "ProteinMPNN")
     colors = {
-        "UMA-Inverse-1": "#2C5F8E",
-        "LigandMPNN":    "#C13C3C",
-        "ProteinMPNN":   "#888888",
+        "UMA-Inverse": "#2C5F8E",
+        "LigandMPNN":  "#C13C3C",
+        "ProteinMPNN": "#888888",
     }
 
     for ax, split in zip(axes, splits):
-        v3_meds = _load_pdb_medians(args.bench_dir / f"v3-ep23-test_{split}" / "per_pdb.csv")
+        v3_meds = _load_pdb_medians(args.bench_dir / f"v5-test_{split}" / "per_pdb.csv")
 
         def _mean_err(meds):
             if not meds:
@@ -85,7 +88,7 @@ def main() -> None:
 
         v3_mean, v3_err = _mean_err(v3_meds)
 
-        values = [v3_mean, LIGANDMPNN_REF[split], PROTEINMPNN_REF[split]]
+        values = [v3_mean, LIGANDMPNN_OURS[split], PROTEINMPNN_REF[split]]
         errors = [v3_err, 0.0, 0.0]
 
         x = np.arange(len(methods))
@@ -94,11 +97,15 @@ def main() -> None:
             color=[colors[m] for m in methods],
             edgecolor="black", linewidth=0.5,
         )
-        # Annotate each bar with its value
-        for bar, val in zip(bars, values):
-            if val == val:  # not NaN
-                ax.text(bar.get_x() + bar.get_width() / 2, val + 0.015,
-                        f"{val:.3f}", ha="center", va="bottom", fontsize=8)
+        # Annotate each bar; for LigandMPNN (ours) show the published value in parens.
+        for idx, (bar, val) in enumerate(zip(bars, values)):
+            if val != val:  # NaN
+                continue
+            txt = f"{val:.3f}"
+            if idx == 1:
+                txt = f"{val:.3f}\n(paper {LIGANDMPNN_PAPER[split]:.3f})"
+            ax.text(bar.get_x() + bar.get_width() / 2, val + 0.015,
+                    txt, ha="center", va="bottom", fontsize=7.5)
 
         ax.set_xticks(x)
         ax.set_xticklabels(methods, rotation=20, ha="right", fontsize=9)
@@ -110,14 +117,15 @@ def main() -> None:
         if split == splits[0]:
             ax.set_ylabel("Interface sequence recovery", fontsize=10)
         if split == "nucleotide":
-            ax.text(0.5, 0.97, "(featurizer ablation;\nnot a fair comparison)",
+            ax.text(0.5, 0.97, "(nucleic acid routed\nas ligand context)",
                     transform=ax.transAxes, ha="center", va="top",
                     fontsize=8, color="#666", style="italic")
 
     fig.suptitle(
-        "Interface sequence recovery, LigandMPNN-paper protocol\n"
-        "(10 designs/PDB, T=0.1, random decoding, 5Å sidechain cutoff)",
-        fontsize=11, y=1.0,
+        "Interface sequence recovery (matched protocol: 10 designs/PDB, T=0.1, "
+        "random decoding, 5Å cutoff)\n"
+        "LigandMPNN re-run by us on identical structures; published values in parentheses",
+        fontsize=10, y=1.02,
     )
     plt.tight_layout()
 

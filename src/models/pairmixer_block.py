@@ -1,17 +1,32 @@
 """
 src/models/pairmixer_block.py
 ─────────────────────────────
-PairMixer Block — Genesis Molecular AI / Pearl architecture.
+PairMixer-style pair block — a from-scratch reimplementation of the PairMixer
+layer for the UMA-Inverse encoder.
 
-Key innovations vs. standard Pairformer (AlphaFold3 / Boltz-1):
-  - Drops Triangle Attention  (O(L³) memory) → 4x faster on long sequences
-  - Drops Sequence Updates    (no MSA dependency for v1)
-  - Retains Triangle Multiplication via explicit torch.matmul
-    (Pearl insight: cuBLAS dispatch avoids einsum VRAM spikes on A-series GPUs)
-  - Net result: 34% lower training cost, matching AF3/Boltz-1 benchmark accuracy
+Defining recipe vs. the standard Pairformer (AlphaFold3 / Boltz-1):
+  - Drops Triangle Attention  (O(L³) memory) → up to 4x faster inference
+  - Drops the Sequence / MSA track (pure pair-space reasoning)
+  - Keeps Triangle Multiplication (outgoing + incoming) as the only geometric mix
+  - Reported net result in the paper: ~34% lower training cost at matched accuracy
 
-Reference: "Triangle Multiplication is All You Need for Biomolecular
-            Structure Representations" — Genesis Molecular AI, ICLR 2026
+Reference:
+  Ouyang-Zhang, Murugan, Diaz, Scarpellini, Bowen, Gruver, Klivans,
+  Krähenbühl, Faust, Al-Shedivat. "Triangle Multiplication is All You Need
+  for Biomolecular Structure Representations." arXiv:2510.18870 (2025).
+  Genesis Research / UT Austin. Official code:
+  https://github.com/genesistherapeutics/pairmixer
+
+This is NOT a bit-exact port of the official repo. Faithful pieces: the
+pair-only block structure, both triangle-multiplication directions, the
+AF3/Boltz input-gate / output-gate-from-normed-input formulation, and pair
+masking. Deliberate divergences in this reimplementation:
+  - Triangle contraction uses an explicit (rearrange + matmul) instead of the
+    reference einsum — mathematically identical, no fp32 up-cast here.
+  - PairTransition is a plain GELU MLP, not the reference SwiGLU transition.
+  - No AF2/AF3 row/column structured dropout (dropout lives in the transition).
+  - Block order is incoming → outgoing (reference uses outgoing → incoming).
+  - PyTorch-default init and bias-carrying projections.
 """
 
 import torch
@@ -48,8 +63,8 @@ class TriangleMultiplicationOutgoing(nn.Module):
 
     z_ij ← Σ_k  sigmoid(gate_ik) ⊙ proj_ik  ·  sigmoid(gate_jk) ⊙ proj_jk
 
-    Implemented with explicit torch.matmul (Pearl / cuBLAS insight) rather
-    than torch.einsum to avoid VRAM spikes from kernel fusion on some backends.
+    Implemented with an explicit torch.matmul instead of the reference
+    torch.einsum; the two are mathematically identical.
     """
 
     def __init__(self, dim: int, hidden_dim: int) -> None:
@@ -151,7 +166,10 @@ class PairMixerBlock(nn.Module):
         Z = Z + Transition(Z)
 
     No sequence updates, no triangle attention — pure pair-space reasoning.
-    This is the core of the Genesis / Pearl efficiency gain.
+    This is the core of the PairMixer efficiency gain.
+
+    Note: the reference applies outgoing before incoming; this block applies
+    incoming before outgoing (see module docstring).
     """
 
     def __init__(

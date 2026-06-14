@@ -24,8 +24,9 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 import matplotlib.pyplot as plt
 
-LIGANDMPNN_REF = {"metal": 0.775, "small_molecule": 0.633}
-PROTEINMPNN_REF = {"metal": 0.406, "small_molecule": 0.505}
+LIGANDMPNN_OURS = {"metal": 0.644, "small_molecule": 0.598, "nucleotide": 0.533}
+LIGANDMPNN_PAPER = {"metal": 0.775, "small_molecule": 0.633, "nucleotide": 0.505}
+PROTEINMPNN_REF = {"metal": 0.406, "small_molecule": 0.505, "nucleotide": 0.471}
 
 
 def _load_pdb_medians(csv_path: Path) -> list[float]:
@@ -59,11 +60,11 @@ def main() -> None:
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
-    splits = ("metal", "small_molecule")
-    fig, axes = plt.subplots(1, 2, figsize=(9, 4.5), sharey=True)
+    splits = ("metal", "small_molecule", "nucleotide")
+    fig, axes = plt.subplots(1, 3, figsize=(12, 4.5), sharey=True)
 
     for ax, split in zip(axes, splits):
-        v3 = _load_pdb_medians(args.bench_dir / f"v3-ep23-test_{split}" / "per_pdb.csv")
+        v3 = _load_pdb_medians(args.bench_dir / f"v5-test_{split}" / "per_pdb.csv")
 
         data = v3 or [0.0]
         parts = ax.violinplot([data], positions=[1], widths=0.6,
@@ -82,16 +83,17 @@ def main() -> None:
                        whiskerprops=dict(color="black", linewidth=0.7),
                        capprops=dict(color="black", linewidth=0.7))
 
-        if split in LIGANDMPNN_REF:
-            ax.axhline(LIGANDMPNN_REF[split], color="#C13C3C", linestyle="--",
+        if split in LIGANDMPNN_OURS:
+            ax.axhline(LIGANDMPNN_OURS[split], color="#C13C3C", linestyle="--",
                        linewidth=1.3, alpha=0.85, zorder=0,
-                       label=f"LigandMPNN (paper): {LIGANDMPNN_REF[split]:.3f}")
+                       label=f"LigandMPNN (ours): {LIGANDMPNN_OURS[split]:.3f} "
+                             f"(paper {LIGANDMPNN_PAPER[split]:.3f})")
             ax.axhline(PROTEINMPNN_REF[split], color="#888888", linestyle=":",
                        linewidth=1.3, alpha=0.85, zorder=0,
                        label=f"ProteinMPNN (paper): {PROTEINMPNN_REF[split]:.3f}")
 
         ax.set_xticks([1])
-        ax.set_xticklabels(["UMA-Inverse-1"], fontsize=10)
+        ax.set_xticklabels(["UMA-Inverse"], fontsize=10)
         ax.set_xlim(0.4, 1.6)
         ax.set_ylim(0, 1.0)
         ax.grid(axis="y", alpha=0.25, linestyle="--", linewidth=0.5)
@@ -104,7 +106,7 @@ def main() -> None:
         ax.legend(loc="lower right", fontsize=8, framealpha=0.9)
 
     fig.suptitle(
-        "UMA-Inverse-1 interface recovery distribution vs paper-reported references",
+        "UMA-Inverse interface recovery distribution vs paper-reported references",
         fontsize=11, y=1.0,
     )
     plt.tight_layout()

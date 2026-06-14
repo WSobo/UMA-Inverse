@@ -97,6 +97,70 @@ def _git_hash() -> str:
         return "unknown"
 
 
+# ── External (LigandMPNN) sequence scoring ──────────────────────────────────
+# The PDB parser is vendored from LigandMPNN, so a LigandMPNN design's sequence
+# aligns position-for-position with ctx.native_sequence. We verify this with a
+# hard assertion (LigandMPNN's native record must equal ctx native) before
+# scoring, so a chain-order / parse mismatch fails loudly instead of silently
+# producing a wrong recovery.
+from types import SimpleNamespace  # noqa: E402
+
+_AA_ALPHABET = "ACDEFGHIKLMNPQRSTVWY"
+_AA_TO_TOK = {c: i for i, c in enumerate(_AA_ALPHABET)}
+
+
+def _seq_to_tokens(seq: str) -> torch.Tensor:
+    return torch.tensor([_AA_TO_TOK.get(c, 20) for c in seq], dtype=torch.long)
+
+
+def _tokens_to_seq(toks: torch.Tensor) -> str:
+    return "".join(_AA_ALPHABET[int(t)] if int(t) < 20 else "X" for t in toks)
+
+
+def _read_fasta_seqs(path: Path) -> list[str]:
+    """Sequences with chain separators stripped; record 0 native, rest designs."""
+    seqs: list[str] = []
+    cur: list[str] = []
+    started = False
+    with path.open() as f:
+        for line in f:
+            line = line.rstrip("\n")
+            if line.startswith(">"):
+                if started:
+                    seqs.append("".join(cur).replace(":", "").replace("/", ""))
+                cur = []
+                started = True
+            else:
+                cur.append(line)
+        if started:
+            seqs.append("".join(cur).replace(":", "").replace("/", ""))
+    return seqs
+
+
+def _load_external_samples(seqs_dir: Path, pid: str, native_tokens: torch.Tensor,
+                           num_samples: int):
+    """Load LigandMPNN designs for *pid* aligned to ctx native. Returns a list of
+    SimpleNamespace(token_ids, seed), or None if the file is missing or the native
+    record disagrees with ctx (alignment guard)."""
+    fa = seqs_dir / "seqs" / f"{pid}.fa"
+    if not fa.exists():
+        fa = seqs_dir / "seqs" / f"{pid.lower()}.fa"
+    if not fa.exists():
+        return None
+    seqs = _read_fasta_seqs(fa)
+    if len(seqs) < 2:
+        return None
+    native_seq = _tokens_to_seq(native_tokens)
+    if seqs[0] != native_seq:
+        return None
+    out = []
+    for j, d in enumerate(seqs[1:1 + num_samples]):
+        if len(d) != native_tokens.numel():
+            return None
+        out.append(SimpleNamespace(token_ids=_seq_to_tokens(d), seed=j))
+    return out or None
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ckpt", required=True, type=Path)
@@ -127,6 +191,12 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=None,
                         help="Cap the number of PDBs (debugging).")
     parser.add_argument("--device", choices=["cuda", "cpu", "auto"], default="auto")
+    parser.add_argument("--ligandmpnn-seqs-dir", type=Path, default=None,
+                        help="If set, score these LigandMPNN designs (read "
+                             "<dir>/seqs/<pdb>.fa, record 0 = native, rest = "
+                             "designs) through the identical interface/recovery "
+                             "path instead of sampling from the model. Yields an "
+                             "apples-to-apples LigandMPNN interface baseline.")
     args = parser.parse_args()
 
     out_dir = args.out_dir / args.run_name
@@ -193,17 +263,26 @@ def main() -> None:
             skipped.append((pid, "no interface residues"))
             continue
 
-        resolved_constraints = unconstrained.resolve(ctx)
-        samples = autoregressive_design(
-            session=session,
-            ctx=ctx,
-            constraints=resolved_constraints,
-            num_samples=args.num_samples,
-            batch_size=args.batch_size,
-            temperature=args.temperature,
-            seed=args.seed + idx,
-            decoding_order=args.decoding_order,
-        )
+        if args.ligandmpnn_seqs_dir is not None:
+            samples = _load_external_samples(
+                args.ligandmpnn_seqs_dir, pid, ctx.native_sequence.cpu(), args.num_samples,
+            )
+            if not samples:
+                logger.warning("skip %s: LigandMPNN seqs missing or native mismatch", pid)
+                skipped.append((pid, "ligandmpnn seqs missing/native-mismatch"))
+                continue
+        else:
+            resolved_constraints = unconstrained.resolve(ctx)
+            samples = autoregressive_design(
+                session=session,
+                ctx=ctx,
+                constraints=resolved_constraints,
+                num_samples=args.num_samples,
+                batch_size=args.batch_size,
+                temperature=args.temperature,
+                seed=args.seed + idx,
+                decoding_order=args.decoding_order,
+            )
 
         native = ctx.native_sequence.cpu()
         sample_recoveries: list[float] = []
@@ -266,6 +345,9 @@ def main() -> None:
             "pdb_dir": str(args.pdb_dir),
             "ckpt": str(args.ckpt),
             "ckpt_stem": args.ckpt.stem,
+            "scored_model": ("ligandmpnn" if args.ligandmpnn_seqs_dir else "uma-inverse"),
+            "ligandmpnn_seqs_dir": (str(args.ligandmpnn_seqs_dir)
+                                    if args.ligandmpnn_seqs_dir else None),
             "config": str(args.config),
             "num_samples_per_pdb": args.num_samples,
             "temperature": args.temperature,

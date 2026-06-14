@@ -33,10 +33,12 @@ cd "${PROJ}"
 
 # Defaults — override via sbatch --export
 KL_CKPT="${KL_CKPT:-checkpoints/uma-inverse-v3.ckpt}"
+KL_CONFIG="${KL_CONFIG:-configs/config_v3.yaml}"   # must match the ckpt's training featurization
 KL_MODE="${KL_MODE:-mechanism}"
 KL_N="${KL_N:-200}"
 KL_SEED="${KL_SEED:-0}"
 KL_NUM_BATCHES="${KL_NUM_BATCHES:-10}"
+KL_EXTRA_ARGS="${KL_EXTRA_ARGS:-}"                 # e.g. "--skip-ligandmpnn"
 
 # PDB list selection
 case "${KL_MODE}" in
@@ -93,9 +95,11 @@ echo "     seed        = ${KL_SEED}"
 
 uv run python scripts/paper/distal_kl_shift.py \
     --uma-ckpt "${KL_CKPT}" \
+    --config "${KL_CONFIG}" \
     --pdb-list "${PDB_LIST}" \
     --out-dir "${OUT_DIR}" \
     --num-batches "${KL_NUM_BATCHES}" \
-    --seed "${KL_SEED}"
+    --seed "${KL_SEED}" \
+    ${KL_EXTRA_ARGS}
 
 echo ">> distal-KL run complete."

@@ -18,6 +18,8 @@ from pathlib import Path
 
 import torch
 
+from src.data.pdb_parser import _NUCLEOTIDE_RESIDUES
+
 logger = logging.getLogger(__name__)
 
 # Atoms that are NOT sidechain. Glycine has no sidechain heavy atoms; by this
@@ -88,6 +90,22 @@ def compute_sidechain_interface_mask(
             resname = residue.get_resname().strip().upper()
 
             if het_flag == " ":
+                # Nucleic-acid residues (DNA/RNA) are ATOM records with a blank
+                # het_flag. Match the featurizer (src.data.pdb_parser), which
+                # routes them into the ligand context pool — so the interface
+                # mask scores residues against the same nucleic-acid atoms the
+                # model is conditioned on, instead of finding no ligand and
+                # skipping the structure entirely.
+                if resname in _NUCLEOTIDE_RESIDUES:
+                    for atom in residue.get_atoms():
+                        if not include_zero_occupancy and atom.get_occupancy() == 0.0:
+                            continue
+                        elem = (atom.element or atom.get_name()[0]).strip().upper()
+                        if elem in _HYDROGEN_ELEMENTS:
+                            continue
+                        ligand_coords.append(list(atom.get_coord()))
+                    continue
+
                 # Standard protein residue — harvest sidechain heavy atoms.
                 rid = _build_residue_key(chain_id, int(res_num), icode)
                 side: list[list[float]] = []
