@@ -382,8 +382,9 @@ def main() -> None:
 
         method_dir = args.cofold_base / method
         # The Boltz-2 input filename was <pdb_id>_sample<NN>.yaml so the
-        # base used in the output dir tree is <pdb_id>_sample<NN>.
-        base = f"{pdb_id}_sample{s_idx:02d}"
+        # base used in the output dir tree is <pdb_id>_sample<NN>. The native
+        # baseline arm (sample_idx=-1) is emitted as <pdb_id>_native.yaml.
+        base = f"{pdb_id}_native" if s_idx < 0 else f"{pdb_id}_sample{s_idx:02d}"
 
         ligand_ccd = sel.get("ccd_code") or sel.get("ion")
         metrics = _extract_metrics_for_input(
