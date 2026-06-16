@@ -1,6 +1,6 @@
 """Figure 2: standard interface-recovery benchmark bar chart.
 
-Three panels (metal, small_molecule, nucleotide-caveat-only). Primary bars
+Three panels (small_molecule, metal, nucleotide-caveat-only). Primary bars
 are UMA-Inverse-1 (v3), LigandMPNN (paper), ProteinMPNN (paper). Supplemental
 comparison bars for UMA-v2 and UMA-v1 are included lighter.
 
@@ -34,7 +34,7 @@ import numpy as np
 # UMA); published values from Dauparas et al. shown in parentheses for reference.
 LIGANDMPNN_OURS = {"metal": 0.644, "small_molecule": 0.598, "nucleotide": 0.533}
 LIGANDMPNN_PAPER = {"metal": 0.775, "small_molecule": 0.633, "nucleotide": 0.505}
-PROTEINMPNN_REF = {"metal": 0.406, "small_molecule": 0.505, "nucleotide": 0.471}
+PROTEINMPNN_REF = {"metal": 0.406, "small_molecule": 0.505, "nucleotide": 0.340}
 
 
 def _load_pdb_medians(csv_path: Path) -> list[float]:
@@ -68,7 +68,7 @@ def main() -> None:
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
-    splits = ("metal", "small_molecule", "nucleotide")
+    splits = ("small_molecule", "metal", "nucleotide")
     fig, axes = plt.subplots(1, 3, figsize=(10, 4), sharey=True)
 
     methods = ("UMA-Inverse", "LigandMPNN", "ProteinMPNN")

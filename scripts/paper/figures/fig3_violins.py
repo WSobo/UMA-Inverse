@@ -1,8 +1,7 @@
 """Figure 3: per-PDB recovery violin plots.
 
-Two panels (metal, small_molecule). Three violins per panel: UMA-Inverse-1 (v3,
-primary), UMA-v2 and UMA-v1 (supplemental). LigandMPNN/ProteinMPNN paper numbers
-shown as horizontal reference lines.
+Three panels (small_molecule, metal, nucleotide). One UMA-Inverse violin per panel,
+with LigandMPNN (ours/paper) and ProteinMPNN shown as horizontal reference lines.
 
 Sources:
     UMA-Inverse-1 (v3): outputs/benchmark/interface_recovery/v3-ep23-test_<cls>/per_pdb.csv
@@ -26,7 +25,7 @@ import matplotlib.pyplot as plt
 
 LIGANDMPNN_OURS = {"metal": 0.644, "small_molecule": 0.598, "nucleotide": 0.533}
 LIGANDMPNN_PAPER = {"metal": 0.775, "small_molecule": 0.633, "nucleotide": 0.505}
-PROTEINMPNN_REF = {"metal": 0.406, "small_molecule": 0.505, "nucleotide": 0.471}
+PROTEINMPNN_REF = {"metal": 0.406, "small_molecule": 0.505, "nucleotide": 0.340}
 
 
 def _load_pdb_medians(csv_path: Path) -> list[float]:
@@ -60,7 +59,7 @@ def main() -> None:
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
-    splits = ("metal", "small_molecule", "nucleotide")
+    splits = ("small_molecule", "metal", "nucleotide")
     fig, axes = plt.subplots(1, 3, figsize=(12, 4.5), sharey=True)
 
     for ax, split in zip(axes, splits):
