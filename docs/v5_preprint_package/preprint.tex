@@ -166,8 +166,8 @@ predicts the most probable complementary sequence.
 We use the same training, validation, and test splits as LigandMPNN~\citep{dauparas2025ligandmpnn},
 derived from the PDB with cutoffs at 30\% sequence identity between splits. PDB files are fetched
 from RCSB and parsed by a vendorized, extended version of the LigandMPNN parser
-(\texttt{src/data/pdb\_parser.py}). All atoms beyond 8\,{\AA} of any non-protein heavy atom are
-included; up to \textbf{50} ligand heavy atoms are retained per structure (raised from 25 to
+(\texttt{src/data/pdb\_parser.py}). The full protein is kept (residues are not cropped to a pocket around the ligand); up to
+\textbf{50} ligand heavy atoms nearest the protein centroid are retained per structure (raised from 25 to
 accommodate larger ligands and nucleic-acid context). Structures exceeding 384 residue-plus-ligand
 nodes are cropped to 384 nodes for batch efficiency during training.
 
@@ -256,7 +256,7 @@ then exploits.
 Sequences are decoded in a random order during training; non-designed residues are placed earliest so
 they provide context. The autoregressive context for residue $i$ is a softmax-weighted aggregation
 over previously decoded residues, biased by the residue--residue sub-block of $\bz$
-(Eq.~analogous to ProteinMPNN). The \emph{ligand} context is the key departure from a mean-pool
+(analogous to ProteinMPNN). The \emph{ligand} context is the key departure from a mean-pool
 baseline: rather than averaging the residue--ligand sub-block $\bz_{i,\ell}$ uniformly, each residue
 $i$ reads a position-specific, attention-weighted summary,
 \begin{equation}
@@ -528,9 +528,9 @@ it both methods yield valid complexes (LigandMPNN slightly closer to the native 
 The two architectural additions target distinct failure modes. The distogram objective constrains the
 encoder to keep its pair tensor structure-predictive (93.1\% top-1), rather than collapsing
 it into a sequence-only shortcut; the learned ligand attention then reads that tensor in a
-position-specific way, repairing the distal-residue divergence of a uniform mean-pool. We motivate
-these choices by design rationale and the auxiliary head's high top-1 binned-distance accuracy
-rather than a controlled on/off ablation.
+position-specific way, repairing the distal-residue divergence of a uniform mean-pool. These additions
+are motivated by design rationale and the auxiliary head's high top-1 binned-distance accuracy rather
+than a controlled ablation, a limitation we return to below.
 
 \paragraph{Remaining gaps.}
 Against our matched-protocol LigandMPNN, the metal and small-molecule gaps are modest under this
@@ -559,10 +559,15 @@ propagation, but condition on ligands through a separate per-residue, local atom
 LigandMPNN) injected into the residue node features, decoupling ligand coverage from the cubic token
 budget.
 
-We did not run the controlled experiment to confirm this is the dominant cause of the nucleotide
-failure, and leave that confirmation to future work. For the protein-ligand splits we
-similarly lack a controlled ablation isolating the architectural source of the residual gaps, and do
-not attribute them to a specific cause.
+\paragraph{Limitations.}
+The main limitation of this evaluation is that we do not ablate the two architectural additions: we do
+not isolate the contribution of the distogram head or the position-specific ligand attention to
+recovery, and a controlled on/off ablation of the two is the obvious next experiment. For the same
+reason we do not run the controlled test that would confirm the global atom budget is the dominant
+cause of the nucleotide failure, and we do not attribute the residual small-molecule and metal gaps to
+a specific architectural cause. Finally, the diversity comparison (\S\ref{sec:results_pocket}) is a
+single-temperature snapshot rather than the temperature-matched Pareto comparison it would take to
+settle that point.
 
 \paragraph{Future directions.}
 The most direct follow-up to our results is to test whether the encoder's distal ligand propagation
@@ -570,8 +575,7 @@ confers any practical advantage on tasks where distal context plausibly matters,
 multi-site design, or function- rather than identity-based objectives, since it demonstrably does not
 help single-position native recovery. A controlled, temperature-matched recovery-vs-diversity (Pareto)
 comparison against LigandMPNN would also place the diversity question on firmer footing than the
-single-temperature snapshot reported here. Realizing the \emph{hybrid encoder} argued for in
-\S\ref{sec:discussion}, a dense residue tensor for geometry plus a per-residue local atom-context
+single-temperature snapshot reported here. Realizing the \emph{hybrid encoder} argued for above, a dense residue tensor for geometry plus a per-residue local atom-context
 module for ligand conditioning, is the most direct route to fixing nucleotide design; nucleotide-level
 tokens or sparse atom attention are alternatives. Other
 extensions include flow-matching~\citep{lipman2022flowmatching} in place of cross-entropy, full RDKit-derived
