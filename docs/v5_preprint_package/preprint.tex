@@ -153,8 +153,12 @@ geometric structure in its pair tensor, which the decoder then reads.
 AlphaFold3~\citep{abramson2024alphafold3} and Boltz-2~\citep{passaro2025boltz2} solve the forward
 problem (structure prediction given sequence and ligand) using diffusion over atomic coordinates.
 RFdiffusion~\citep{watson2023rfdiffusion} tackles backbone generation but requires a separate inverse-folding
-step. UMA-Inverse occupies the inverse-folding niche: given a fixed protein--ligand backbone, it
-predicts the most probable complementary sequence.
+step. RFdiffusion3~\citep{butcher2025rfdiffusion3} has begun folding sequence design into the generative
+process itself---its all-atom diffusion co-generates side-chain atoms, implicitly specifying residue
+identities alongside the backbone---but the directly diffused sequences remain less structure-consistent
+than dedicated inverse folding, and the authors still fit sequences with ProteinMPNN/LigandMPNN for
+their benchmarks. Dedicated inverse folding thus remains the accuracy frontier. UMA-Inverse occupies that
+niche: given a fixed protein--ligand backbone, it predicts the most probable complementary sequence.
 
 % -----------------------------------------------------------------------
 \section{Methods}
@@ -215,11 +219,13 @@ five backbone-atom-to-ligand-atom distances and encode frame-relative sine/cosin
 residue's local frame to each ligand atom.
 
 \paragraph{Pair-tensor initialization.}
-Node features are projected to $d{=}128$ and summed into initial node representations
+Node features are projected to $d{=}128$ to form initial node representations
 $\bh_i \in \R^{128}$. The pair tensor $\bz_{ij} \in \R^{128}$ is initialized as
-$\bz_{ij} = W_L\,\bh_i + W_R\,\bh_j + W_{\text{rbf}}\,\phi_{\text{rbf}}(d_{ij})$,
+$\bz_{ij} = W_L\,\bh_i + W_R\,\bh_j + W_{\text{rbf}}\,\phi_{\text{rbf}}(d_{ij}) + \mathbf{r}_{ij}$,
 where $\phi_{\text{rbf}}(d_{ij}) \in \R^{32}$ is a 32-Gaussian RBF embedding of the inter-node
-distance over $[0,24]$\,{\AA}.
+distance over $[0,24]$\,{\AA}, and $\mathbf{r}_{ij}$ is a learned relative-position embedding of the
+clamped sequence offset $\mathrm{clip}(i-j,\,\pm 32)$, with a dedicated index for any pair involving a
+ligand atom.
 
 \paragraph{PairMixer encoder.}
 The pair tensor is refined by 6 PairMixer blocks. Each block applies, in sequence:
@@ -229,11 +235,14 @@ $\bz_{ij} \leftarrow \bz_{ij} + \text{LN}(\sum_k g(\bz_{ki}) \odot g(\bz_{kj}))$
 $\bz_{ij} \leftarrow \bz_{ij} + \text{LN}(\sum_k g(\bz_{ik}) \odot g(\bz_{jk}))$;
 (iii)~a two-layer transition MLP (expansion 4) applied per pair. The gate
 $g(\cdot) = \text{Linear}(\cdot) \odot \sigma(\text{Linear}(\cdot))$ follows the AlphaFold2
-convention; no triangle self-attention is used. We reimplement the PairMixer block
+convention. Each triangle-multiplication update additionally applies an AlphaFold2-style output gate
+and an output projection, omitted from the expressions above for brevity; no triangle self-attention
+is used. We reimplement the PairMixer block
 of~\citet{ouyangzhang2025pairmixer} from scratch, using a standard GELU transition MLP in place of
 their gated (SwiGLU) variant and omitting their row/column structured dropout; the triangle
-multiplication and gating follow the original formulation. After encoding, a mean pool of each
-residue's row of $\bz$ is projected and added back to the node embedding.
+multiplication and gating follow the original formulation. After encoding, a learned
+attention-weighted pool over each residue's row of $\bz$ (masked softmax over valid columns) is
+projected and added back to the node embedding.
 
 \paragraph{Auxiliary distogram head.}
 \label{sec:distogram}
@@ -247,7 +256,7 @@ with the combined objective
 \end{equation}
 where $\mathcal{L}_{\text{CE}}$ is the per-residue sequence cross-entropy and
 $\mathcal{L}_{\text{distogram}}$ is the mean cross-entropy of the binned-distance classification over
-valid residue pairs. The head is \emph{training-only}: at inference the model returns sequence logits
+valid residue pairs (both residues present, $|i-j|\geq 2$). The head is \emph{training-only}: at inference the model returns sequence logits
 and the head is discarded (it is ignored by the inference checkpoint loader). Its role is to force the
 encoder's pair tensor to remain explicitly structure-predictive, which the ligand-attention decoder
 then exploits.
@@ -260,30 +269,36 @@ over previously decoded residues, biased by the residue--residue sub-block of $\
 baseline: rather than averaging the residue--ligand sub-block $\bz_{i,\ell}$ uniformly, each residue
 $i$ reads a position-specific, attention-weighted summary,
 \begin{equation}
-  \alpha_{i\ell} = \softmax_\ell\!\big(\bz_{i\ell}\,\bW_a\big),
+  \alpha_{i\ell} = \softmax_\ell\!\Big(\tfrac{\bz_{i\ell}\,\bW_a}{\sqrt{d_{\text{pair}}}}\Big),
   \qquad
-  \bh_i^{(\text{lig})} = \sum_{\ell} \alpha_{i\ell}\,\psi(\bz_{i\ell}),
+  \mathbf{s}_i = \sum_{\ell} \alpha_{i\ell}\,\bz_{i\ell},
 \end{equation}
-with $\bW_a = \text{Linear}(d_{\text{pair}}, 1)$ (128 added parameters). This lets interface residues
+with $\bW_a = \text{Linear}(d_{\text{pair}}, 1)$ (128 added parameters). The weighted sum is taken over
+the raw residue--ligand pair rows; the ligand-context channel fed to the decoder is a learned
+projection of $\mathbf{s}_i$ concatenated with a mean-pooled residue--residue context,
+$\bh_i^{(\text{lig})} = W_c\,[\,\mathrm{pool}_j\,\bz_{ij}\,\Vert\,\mathbf{s}_i\,]$. This lets interface residues
 attend sharply to their coordinating ligand atoms while distal residues integrate the field more
 diffusely, rather than every residue receiving the same average. The design was motivated by an
 outcome-level KL analysis of the mean-pool baseline, which diverged ${\sim}20{\times}$ from the native
-distribution at $>$25\,{\AA} despite encoding strong near-ligand signal. The final logit is
-$\text{logits}_i = \text{MLP}([\bh_i + \bh_i^{(\text{ar})},\;\bh_i^{(\text{lig})}]) \in \R^{21}$.
+distribution at $>$25\,{\AA} despite encoding strong near-ligand signal. The node representation, the
+autoregressive context, and the ligand context enter the decoder as separate concatenated channels,
+$\text{logits}_i = \text{MLP}([\,\bh_i \,\Vert\, \bh_i^{(\text{ar})} \,\Vert\, \bh_i^{(\text{lig})}\,]) \in \R^{21}$.
 
 The model has approximately 3.3\,M parameters, comparable to LigandMPNN (${\sim}2.5$\,M); the
-distogram head and ligand-attention readout add ${<}5$\,k parameters combined.
+distogram head and ligand-attention readout add ${\approx}5$\,k parameters combined.
 
 \subsection{Training}
 \label{sec:training}
 
-We train with a three-stage curriculum of increasing structural complexity using AdamW
+We train with a three-stage curriculum of increasing structural complexity, progressively raising
+the per-example crop size ($64\to128\to384$ nodes) following the staged training schedule
+of~\citet{ouyangzhang2025pairmixer}. We optimize with AdamW
 \citep{loshchilov2019adamw} (lr $3{\times}10^{-4}$, weight decay $10^{-2}$), linear warmup over
 2{,}000 steps, and cosine decay thereafter; gradients clipped at 1.0; bfloat16-mixed precision.
 Stage 1 ($\leq$64 nodes) and Stage 2 ($\leq$128 nodes) build up structural context; Stage 3
 ($\leq$384 nodes, $M{=}50$ ligand atoms, distogram $\lambda{=}0.2$) is full-resolution training on
 2$\times$A100 GPUs with effective batch 16 (the final stage taking roughly one week). The best
-checkpoint by validation loss is at
+checkpoint by validation loss is at epoch
 11 (val loss 1.22, val accuracy 63.2\%); training is plateaued by this
 point, with the auxiliary distogram top-1 accuracy reaching 93.1\%
 (Table~\ref{tab:training_stages}, Fig.~\ref{fig:training}). We select by validation loss rather than
@@ -339,12 +354,13 @@ how far ligand identity propagates.
   \label{fig:training}
 \end{figure}
 
-The model reaches validation accuracy 63.2\% at its best checkpoint, comparable to the
-validation accuracy reported for LigandMPNN (${\sim}63.7\%$). The auxiliary distogram objective
-trains to 93.1\% top-1 binned-distance accuracy, indicating the encoder's pair tensor is
-strongly structure-predictive. We note that the validation set here includes
-nucleic-acid complexes routed into ligand context, making it a harder and broader set than
-protein/small-molecule-only baselines.
+The model reaches validation accuracy 63.2\% at its best checkpoint, and the auxiliary distogram
+objective trains to 93.1\% top-1 binned-distance accuracy, indicating the encoder's pair tensor is
+strongly structure-predictive. This validation accuracy is the per-residue figure logged during
+training on our split (which includes nucleic-acid complexes routed into ligand context); it is not
+measured on the same metric or data as the recovery numbers reported for LigandMPNN and so is not
+directly comparable. The controlled head-to-head comparison is the matched-protocol interface
+recovery of \S\ref{sec:results_iface}.
 
 \subsection{Teacher-forced sequence recovery}
 \label{sec:results_tf}
@@ -615,6 +631,7 @@ The author declares no competing interests.
 
 % -----------------------------------------------------------------------
 \appendix
+\clearpage
 
 \section{Per-amino-acid recovery}
 \label{sec:aa_recovery}
@@ -624,7 +641,7 @@ with native and predicted marginal frequencies for reference (Table~\ref{tab:per
 highest for backbone-constrained residues (Pro 0.953, Gly 0.906) and lowest for low-frequency,
 context-dependent residues (Gln 0.497, Met 0.500); predicted and native compositions track closely.
 
-\begin{table}[h]
+\begin{table}[!ht]
 \centering
 \caption{Per-amino-acid teacher-forced recovery, native frequency, and predicted frequency on the
   full validation set. UMA-Inverse, best checkpoint (epoch 11).}
@@ -650,7 +667,7 @@ L & 0.814 & 0.097 & 0.107 & Y & 0.645 & 0.035 & 0.032 \\
 \section{Validation metrics by training stage}
 \label{sec:training_detail}
 
-\begin{table}[h]
+\begin{table}[!ht]
 \centering
 \caption{Final validation metrics at the end of each curriculum stage.}
 \label{tab:training_stages}
@@ -666,6 +683,7 @@ Stage 3 & 2$\times$A100  & 384 & 11 & 63.2\% & 1.217 \\
 \end{table}
 
 % -----------------------------------------------------------------------
+\clearpage
 \bibliographystyle{unsrtnat}
 \bibliography{references}
 
