@@ -33,7 +33,7 @@ cd "${PROJ}"
 
 # Defaults — override via sbatch --export
 KL_CKPT="${KL_CKPT:-checkpoints/uma-inverse-v3.ckpt}"
-KL_CONFIG="${KL_CONFIG:-configs/config_v3.yaml}"   # must match the ckpt's training featurization
+KL_CONFIG="${KL_CONFIG:-configs/old_configs/config_v3.yaml}"   # must match the ckpt's training featurization
 KL_MODE="${KL_MODE:-mechanism}"
 KL_N="${KL_N:-200}"
 KL_SEED="${KL_SEED:-0}"

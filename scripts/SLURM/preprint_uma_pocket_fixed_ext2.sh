@@ -21,13 +21,13 @@ cd /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse
 
 echo ">> UMA v3 pocket-fixed designs (ext2, 25 new PDBs)"
 echo ">>   ckpt:      checkpoints/uma-inverse-v3.ckpt"
-echo ">>   config:    configs/config_v3.yaml"
+echo ">>   config:    configs/old_configs/config_v3.yaml"
 echo ">>   selection: outputs/preprint/pdb_selection_extended2.json"
 echo ">>   out-dir:   outputs/preprint/uma_pocket_fixed_v3"
 
 uv run python scripts/paper/run_pocket_fixed_designs.py \
     --ckpt checkpoints/uma-inverse-v3.ckpt \
-    --config configs/config_v3.yaml \
+    --config configs/old_configs/config_v3.yaml \
     --selection outputs/preprint/pdb_selection_extended2.json \
     --out-dir outputs/preprint/uma_pocket_fixed_v3
 

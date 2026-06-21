@@ -27,7 +27,7 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 CKPT="${CKPT:-checkpoints/uma-inverse-v5.ckpt}"
 [[ -f "$CKPT" ]] || CKPT=checkpoints/pairmixerinv-v5-stage3-nodes384-ddp2/epoch_snapshots/epoch-11.ckpt
-CONFIG="${CONFIG:-configs/config_v5.yaml}"
+CONFIG="${CONFIG:-configs/config.yaml}"
 
 for cls in small_molecule metal nucleotide; do
     echo ">> scoring LigandMPNN interface recovery [$cls]  ($(date))"

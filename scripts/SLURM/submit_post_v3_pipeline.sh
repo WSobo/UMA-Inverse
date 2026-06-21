@@ -41,7 +41,7 @@ SKIP_DISTOGRAM_PROBE=0
 
 # Defaults — paths used by every job
 V3_CKPT="${V3_CKPT:-checkpoints/uma-inverse-v3.ckpt}"
-V3_CONFIG="${V3_CONFIG:-configs/config_v3.yaml}"
+V3_CONFIG="${V3_CONFIG:-configs/old_configs/config_v3.yaml}"
 SELECTION="${SELECTION:-outputs/preprint/pdb_selection_combined.json}"
 POCKET_FIXED_OUT="${POCKET_FIXED_OUT:-outputs/preprint/uma_pocket_fixed_v3}"
 WALLCLOCK_PDB="${WALLCLOCK_PDB:-data/raw/pdb_archive/wg/2wgj.pdb}"

@@ -42,7 +42,7 @@ if [[ -z "$CKPT" ]]; then
         CKPT=checkpoints/pairmixerinv-v5-stage3-nodes384-ddp2/epoch_snapshots/epoch-11.ckpt
     fi
 fi
-CONFIG="${CONFIG:-configs/config_v5.yaml}"
+CONFIG="${CONFIG:-configs/config.yaml}"
 NUM_SAMPLES="${NUM_SAMPLES:-10}"
 TEMPERATURE="${TEMPERATURE:-0.1}"
 CUTOFF="${CUTOFF:-5.0}"

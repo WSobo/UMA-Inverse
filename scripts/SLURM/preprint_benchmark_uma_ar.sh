@@ -25,7 +25,7 @@ cd /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse
 
 uv run uma-inverse benchmark \
     --ckpt              checkpoints/uma-inverse-v3.ckpt \
-    --config            configs/config_v3.yaml \
+    --config            configs/old_configs/config_v3.yaml \
     --val-json          LigandMPNN/training/valid.json \
     --pdb-dir           data/raw/pdb_archive \
     --out-dir           outputs/benchmark \

@@ -30,7 +30,7 @@ set -e
 cd /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse
 
 BENCH_CKPT="${BENCH_CKPT:-checkpoints/runA_v4_stage3_ep6_init.ckpt}"
-BENCH_CONFIG="${BENCH_CONFIG:-configs/config_v3.yaml}"
+BENCH_CONFIG="${BENCH_CONFIG:-configs/old_configs/config_v3.yaml}"
 BENCH_RUN_NAME="${BENCH_RUN_NAME:-v4-ep6-full}"
 BENCH_N="${BENCH_N:-1000}"
 BENCH_SEED="${BENCH_SEED:-0}"

@@ -25,7 +25,7 @@ cd /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 CKPT="${CKPT:-checkpoints/pairmixerinv-v5-stage3-nodes384-ddp2/epoch_snapshots/epoch-11.ckpt}"
-CONFIG="${CONFIG:-configs/config_v5.yaml}"
+CONFIG="${CONFIG:-configs/config.yaml}"
 NUM_BATCHES="${NUM_BATCHES:-80}"          # >= test_small_molecule(317)/~6 per batch
 OUT_BASE="${OUT_BASE:-outputs/preprint/distal_kl/by_class_v5}"
 SKIP_LMPNN="${SKIP_LMPNN:-0}"

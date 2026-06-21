@@ -42,7 +42,7 @@ if [[ -z "$BENCH_CKPT" ]]; then
         BENCH_CKPT=checkpoints/pairmixerinv-v5-stage3-nodes384-ddp2/epoch_snapshots/epoch-11.ckpt
     fi
 fi
-BENCH_CONFIG="${BENCH_CONFIG:-configs/config_v5.yaml}"
+BENCH_CONFIG="${BENCH_CONFIG:-configs/config.yaml}"
 BENCH_RUN_NAME="${BENCH_RUN_NAME:-v5-best-full}"
 BENCH_N="${BENCH_N:-1000}"
 BENCH_SEED="${BENCH_SEED:-0}"

@@ -20,7 +20,7 @@
 # doesn't flip — the right way to compare Run A (distogram λ=0.2) vs Control
 # (λ=0) vs the v4-init baseline, instead of the dilution-prone Δrecovery.
 #
-# --config configs/config_v3.yaml: InferenceSession builds the bare UMAInverse
+# --config configs/old_configs/config_v3.yaml: InferenceSession builds the bare UMAInverse
 # from the config YAML and loads strict=False. config_v3.yaml matches the v4
 # featurization; Run A/Control's extra training-only distogram_head keys drop
 # cleanly as "unexpected" (the head lives on the LightningModule, not here).
@@ -36,7 +36,7 @@ set -e
 cd /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse
 
 KL_CKPT="${KL_CKPT:-checkpoints/runA_v4_stage3_ep6_init.ckpt}"
-KL_CONFIG="${KL_CONFIG:-configs/config_v3.yaml}"
+KL_CONFIG="${KL_CONFIG:-configs/old_configs/config_v3.yaml}"
 KL_PDB_LIST="${KL_PDB_LIST:-outputs/preprint/distal_kl/pdb_list.txt}"
 KL_PDB_DIR="${KL_PDB_DIR:-data/raw/pdb_archive}"
 KL_RUN_NAME="${KL_RUN_NAME:-v4-init-ep6}"

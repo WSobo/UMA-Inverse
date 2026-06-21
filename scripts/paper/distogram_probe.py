@@ -353,7 +353,7 @@ def main() -> None:
     parser.add_argument(
         "--config",
         type=Path,
-        default=PROJECT_ROOT / "configs" / "config_v3.yaml",
+        default=PROJECT_ROOT / "configs" / "old_configs" / "config_v3.yaml",
     )
     parser.add_argument("--pdb-list", type=Path, required=True)
     parser.add_argument("--pdb-dir", type=Path, action="append", default=None)

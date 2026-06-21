@@ -53,7 +53,7 @@ fi
 SKIP_FLAGS=""
 [[ "$BENCH_SKIP_TEMPERATURE" == "true" ]] && SKIP_FLAGS="$SKIP_FLAGS --skip-temperature"
 
-# For v3 ckpts, pass BENCH_CONFIG=configs/config_v3.yaml so the model
+# For v3 ckpts, pass BENCH_CONFIG=configs/old_configs/config_v3.yaml so the model
 # architecture and ligand featurizer match the ckpt's training-time flags.
 uv run uma-inverse benchmark \
     --ckpt "$BENCH_CKPT" \

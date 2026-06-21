@@ -27,7 +27,7 @@ EXT=outputs/preprint/pdb_selection_extended_v5.json
 echo ">> [1/2] UMA pocket-fixed designs (extended, 69 new)  ($(date))"
 uv run python scripts/paper/run_pocket_fixed_designs.py \
     --ckpt checkpoints/pairmixerinv-v5-stage3-nodes384-ddp2/epoch_snapshots/epoch-11.ckpt \
-    --config configs/config_v5.yaml \
+    --config configs/config.yaml \
     --selection "$EXT" \
     --out-dir outputs/preprint/uma_pocket_fixed_v5 \
     --num-samples 20 --temperature 0.1 --seed 0

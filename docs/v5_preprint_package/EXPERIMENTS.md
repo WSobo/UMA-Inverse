@@ -8,7 +8,7 @@ protocols (no LigandMPNN re-run needed for the headline interface table).
 Canonical checkpoint: `checkpoints/uma-inverse-v5.ckpt` (min-val-loss snapshot, promoted at
 training-job exit = epoch 11). Until that exists, scripts auto-fall back to
 `checkpoints/pairmixerinv-v5-stage3-nodes384-ddp2/epoch_snapshots/epoch-11.ckpt`.
-Benchmark config: `configs/config_v5.yaml` (smoke-validated: trunk loads 257/257, distogram
+Benchmark config: `configs/config.yaml` (smoke-validated: trunk loads 257/257, distogram
 head dropped, teacher-forced recovery ≈ 0.64 per-PDB).
 
 Training job chain (as of build):
@@ -55,7 +55,7 @@ not change** — reuse them; only the UMA-Inverse (v5) side needs re-running. Bo
   PDBs + precomputes ≤8 Å pocket residues.
 - **Selection RESTORED** from `../UMA-Inverse/` → `outputs/preprint/pdb_selection_combined.json`
   (the v3 curated set: small_molecule + metal classes). No regeneration needed.
-- **Run (UMA side):** `sbatch scripts/SLURM/preprint_uma_pocket_fixed.sh --ckpt checkpoints/uma-inverse-v5.ckpt --config configs/config_v5.yaml --selection outputs/preprint/pdb_selection_combined.json --out-dir outputs/preprint/uma_pocket_fixed_v5`
+- **Run (UMA side):** `sbatch scripts/SLURM/preprint_uma_pocket_fixed.sh --ckpt checkpoints/uma-inverse-v5.ckpt --config configs/config.yaml --selection outputs/preprint/pdb_selection_combined.json --out-dir outputs/preprint/uma_pocket_fixed_v5`
 - **LigandMPNN baseline:** restorable from `../UMA-Inverse/outputs/preprint/ligandmpnn_pocket_fixed`
   (LigandMPNN doesn't change — reuse, don't re-run). Ref metrics copied to
   `outputs/preprint/ligandmpnn_pocket_fixed_metrics_REF.csv`.
@@ -74,13 +74,13 @@ not change** — reuse them; only the UMA-Inverse (v5) side needs re-running. Bo
 
 ### E5 — Ligand-distal signal (native log-prob vs distance shell) 🟡 READY, NOT QUEUED
 - **Script:** `preprint_distal_kl_shift.sh` (env `KL_CKPT`, `KL_MODE=mechanism|outcome`, `KL_N`).
-- **Run:** `sbatch --dependency=afterok:34161619 --export=ALL,KL_CKPT=checkpoints/uma-inverse-v5.ckpt,KL_CONFIG=configs/config_v5.yaml,KL_MODE=outcome scripts/SLURM/preprint_distal_kl_shift.sh`
+- **Run:** `sbatch --dependency=afterok:34161619 --export=ALL,KL_CKPT=checkpoints/uma-inverse-v5.ckpt,KL_CONFIG=configs/config.yaml,KL_MODE=outcome scripts/SLURM/preprint_distal_kl_shift.sh`
   (verify it accepts a `KL_CONFIG`; defaults to config_v3 — must override to config_v5).
 - **Fills:** §Distal signal, Fig 7.
 
 ### E6 — Distogram probe (encoder geometry diagnostic) 🟡 READY, NOT QUEUED
 - **Script:** `preprint_distogram_probe.sh` (env `PROBE_CKPT`, `PROBE_CONFIG`, `PROBE_N`).
-- **Run:** `sbatch --dependency=afterok:34161619 --export=ALL,PROBE_CKPT=checkpoints/uma-inverse-v5.ckpt,PROBE_CONFIG=configs/config_v5.yaml,PROBE_N=400 scripts/SLURM/preprint_distogram_probe.sh`
+- **Run:** `sbatch --dependency=afterok:34161619 --export=ALL,PROBE_CKPT=checkpoints/uma-inverse-v5.ckpt,PROBE_CONFIG=configs/config.yaml,PROBE_N=400 scripts/SLURM/preprint_distogram_probe.sh`
 - **Note:** especially relevant for v5 — the distogram is now a *trained head*, not just a probe.
   Reports top-1 binned-distance accuracy (the in-training metric ≈ 0.93 for cross-check).
 - **Fills:** §Distogram representation, distogram top-1 numbers throughout.

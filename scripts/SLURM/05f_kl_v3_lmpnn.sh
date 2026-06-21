@@ -50,7 +50,7 @@ cd "$OLD"
 uv run python scripts/paper/distal_kl_shift.py \
     $SKIP \
     --uma-ckpt checkpoints/uma-inverse-v3.ckpt \
-    --config configs/config_v3.yaml \
+    --config configs/old_configs/config_v3.yaml \
     --pdb-list "$PDB_LIST" \
     --pdb-dir "$PDB_DIR" \
     --out-dir "$OUT_DIR" \

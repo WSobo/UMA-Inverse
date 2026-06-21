@@ -9,7 +9,7 @@
 
 **Ligand-conditioned protein inverse folding via dense pair-wise attention.**
 
-Given a fixed protein–ligand backbone, UMA-Inverse predicts per-residue amino-acid identity (20 AA + X) under optional design constraints. The architecture is a single dense PairMixer encoder over the union of residue and ligand-atom nodes — no KNN sparsification — providing every residue a direct edge to every ligand atom. Built and trained on the LigandMPNN data protocol (parser, train/valid/test splits) so numbers are directly comparable.
+Given a fixed protein–ligand backbone, UMA-Inverse predicts per-residue amino-acid identity (20 AA + X) under optional design constraints. The architecture is a single dense PairMixer encoder over the union of residue and ligand-atom nodes — no KNN sparsification — giving every residue a direct edge to every ligand atom, with an auxiliary distogram objective and a learned ligand-attention decoder. It is compact (~3.3 M parameters, MSA-free) and built on the LigandMPNN data protocol (parser, train/valid/test splits); for a controlled comparison we re-run LigandMPNN under our identical protocol rather than relying on published numbers.
 
 → Preprint: bioRxiv (link added on submission)
 
@@ -29,7 +29,7 @@ If you don't have uv, plain pip works too: `pip install -e .` (uses the same `py
 
 Trained weights live on [Hugging Face](https://huggingface.co/WSobo/UMA-Inverse) and are **auto-fetched on first inference** into `~/.cache/uma-inverse/`. No separate setup step is required. To pre-fetch explicitly (e.g. for offline machines), run `uv run python scripts/download_weights.py`.
 
-GPU is recommended (any CUDA-capable card with ≥8 GB; the v2 model fits comfortably on a single A5500). CPU inference works but is ~50× slower.
+The model is compact (~3.3 M parameters): inference runs comfortably on **CPU** — the live Space designs a 46-residue protein in ~50 ms — or on any GPU. A GPU is only needed for training.
 
 ---
 
@@ -45,7 +45,7 @@ uv run uma-inverse design \
     --seed 42
 ```
 
-The first call downloads the default checkpoint (~25 MB) and caches it; subsequent calls reuse it. Pass `--ckpt path/to/your.ckpt` to override.
+The first call downloads the default checkpoint (~27 MB) and caches it; subsequent calls reuse it. Pass `--ckpt path/to/your.ckpt` to override.
 
 Outputs are written under `outputs/<pdb-stem>-<timestamp>/`:
 
@@ -248,16 +248,36 @@ For the full option list: `uv run uma-inverse design --help` or `--score --help`
 
 ## Architecture & benchmarks
 
-UMA-Inverse uses a stack of PairMixer blocks (triangle multiplication outgoing/incoming + transition MLP) over a dense `[L+M, L+M]` pair tensor built from RBF-encoded inter-atom distances. Decoding is autoregressive over a randomized residue order at `T = 0.1`, matching the LigandMPNN inference protocol.
+UMA-Inverse replaces LigandMPNN's sparse KNN graph with a **dense pair-representation encoder**: six
+**PairMixer** blocks (triangle multiplication outgoing/incoming + transition MLP — no triangle
+self-attention, no sequence/MSA track) refine every residue–residue and residue–ligand-atom pair in a
+single `[L+M, L+M]` tensor built from RBF-encoded inter-atom distances. An auxiliary **distogram**
+objective keeps that pair tensor structure-predictive, and the autoregressive decoder reads ligand
+context through a learned, position-specific attention over the pair tensor (rather than a uniform
+mean pool). The model is compact (**~3.3 M parameters**, MSA-free). Decoding is autoregressive over a
+randomized residue order at `T = 0.1`, matching the LigandMPNN inference protocol.
 
-Standard interface-recovery benchmark (LigandMPNN test splits, 10 designs per PDB, sidechain ≤ 5 Å cutoff):
+**Interface sequence recovery** on the LigandMPNN test splits (10 samples/PDB, `T = 0.1`, 5 Å
+sidechain–nonprotein cutoff, mean-of-per-PDB-medians). LigandMPNN is **re-run under this identical
+protocol** (its published value in parentheses); ProteinMPNN (published, no ligand conditioning) is a
+lower bound:
 
-| Split | UMA-Inverse-1 | LigandMPNN | ProteinMPNN |
-|---|---:|---:|---:|
-| Metal | 0.500 | 0.775 | 0.406 |
-| Small molecule | 0.545 | 0.633 | 0.505 |
+| Split | N | UMA-Inverse | LigandMPNN (ours / paper) | ProteinMPNN |
+|---|--:|--:|--:|--:|
+| Small molecule | 317 | **0.561** | 0.598 (0.633) | 0.505 |
+| Metal | 82 | **0.551** | 0.644 (0.775) | 0.406 |
+| Nucleotide | 74 | **0.353** | 0.533 (0.505) | 0.340 |
 
-The preprint (bioRxiv, link added on submission) characterizes a regime — **pocket-fixed redesign** — where UMA-Inverse's dense attention shows a structural advantage that local KNN message-passing does not capture.
+UMA-Inverse trails LigandMPNN on every split (by 3.7 / 9.3 / 18.0 pp), but the gap is markedly
+smaller under the controlled re-run than the published numbers imply (e.g. metal: 0.644 vs. the
+published 0.775). On teacher-forced recovery over the full validation set it reaches **66.1 %**
+per-PDB mean recovery (perplexity 2.57, ECE 0.008).
+
+Its distinctive property is **representational**: the dense all-pairs encoder propagates ligand
+identity to residues far beyond the interface, where LigandMPNN's KNN signal decays. In a
+**pocket-fixed** redesign setting the designs remain confidently folded and ligand-binding-competent
+under Boltz-2 cofolding (again modestly behind LigandMPNN). We offer it as a compact, honest, MSA-free
+baseline for ligand-conditioned inverse folding — see the preprint for the full characterization.
 
 ---
 
@@ -271,11 +291,11 @@ For training, data prep, and reproducing benchmark numbers:
 - [scripts/paper/](scripts/paper/) — reproduce the bioRxiv preprint experiments
 
 ```bash
-# Reproduce training (HPC cluster, 8× A5500, ~3.8 days for stage 3)
-sbatch scripts/SLURM/01a_fetch_data.sh        # fetch PDBs from RCSB
-sbatch scripts/SLURM/01b_preprocess.sh        # cache .pt tensors
-sbatch scripts/SLURM/02_pilot_run.sh          # 1-batch overfit sanity
-sbatch scripts/SLURM/03_train_model.sh        # 3-stage curriculum
+# Reproduce training (SLURM HPC; v5 stage 3 ran on 2× A100, ~1 week)
+make download        # fetch PDBs from RCSB
+make preprocess      # cache .pt tensors
+make pilot           # 1-batch overfit sanity check
+make train-v5        # chained 3-stage v5 curriculum (64 → 128 → 384 nodes)
 ```
 
 ```bash

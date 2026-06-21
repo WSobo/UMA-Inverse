@@ -15,7 +15,7 @@
 # NOTE: corrected paths — the stock scripts/SLURM/05_benchmark.sh still cd's to
 # the OLD repo (…/UMA-Inverse, not …/UMA-Inverse).
 #
-# --config configs/config_v3.yaml is REQUIRED: InferenceSession builds the model
+# --config configs/old_configs/config_v3.yaml is REQUIRED: InferenceSession builds the model
 # architecture from the config YAML (not the ckpt) and loads weights strict=False
 # — only warns on mismatch. config_v3.yaml encodes the shared v3/v4 featurization
 # (backbone_full_25, frame_relative_angles, ligandmpnn_atomic, cb anchor); the v4
@@ -35,7 +35,7 @@ set -e
 cd /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse
 
 BENCH_CKPT="${BENCH_CKPT:-checkpoints/runA_v4_stage3_ep6_init.ckpt}"
-BENCH_CONFIG="${BENCH_CONFIG:-configs/config_v3.yaml}"
+BENCH_CONFIG="${BENCH_CONFIG:-configs/old_configs/config_v3.yaml}"
 BENCH_VAL_JSON="${BENCH_VAL_JSON:-LigandMPNN/training/valid.json}"
 BENCH_PDB_DIR="${BENCH_PDB_DIR:-data/raw/pdb_archive}"
 BENCH_OUT_DIR="${BENCH_OUT_DIR:-outputs/benchmark}"

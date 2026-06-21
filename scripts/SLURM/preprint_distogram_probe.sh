@@ -28,7 +28,7 @@ PROJ=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse
 cd "${PROJ}"
 
 PROBE_CKPT="${PROBE_CKPT:-checkpoints/uma-inverse-v3.ckpt}"
-PROBE_CONFIG="${PROBE_CONFIG:-configs/config_v3.yaml}"
+PROBE_CONFIG="${PROBE_CONFIG:-configs/old_configs/config_v3.yaml}"
 PROBE_N="${PROBE_N:-400}"
 PROBE_SEED="${PROBE_SEED:-0}"
 PROBE_OUT_DIR="${PROBE_OUT_DIR:-${PROJ}/outputs/preprint/distogram_probe}"
