@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=uma-preprocess-v5
-#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_out/preprocess_v5_%j.out
-#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_err/preprocess_v5_%j.err
+#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_out/preprocess_v5_%j.out
+#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_err/preprocess_v5_%j.err
 #SBATCH --time=08:00:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
@@ -29,7 +29,7 @@
 # are written to logs/preprocess_v5_failures.txt.
 
 set -e
-cd /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2
+cd /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse
 
 WORKERS="${PREPROC_WORKERS:-$SLURM_CPUS_PER_TASK}"
 OUT_DIR="${PREPROC_OUT_DIR:-data/processed_v5}"

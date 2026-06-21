@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=cofold-ext-array
-#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_out/cofold_ext_arr_%A_%a.out
-#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_err/cofold_ext_arr_%A_%a.err
+#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_out/cofold_ext_arr_%A_%a.out
+#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_err/cofold_ext_arr_%A_%a.err
 #SBATCH --time=6:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -19,7 +19,7 @@
 # is preserved for the downstream merge. Empty chunks exit cleanly.
 
 set -e
-PROJ=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2
+PROJ=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse
 K_DIR="$PROJ/outputs/preprint/boltz_inputs/cofold_chunks/chunk_${SLURM_ARRAY_TASK_ID}"
 OUT="$PROJ/outputs/preprint/cofold_chunks_out/chunk_${SLURM_ARRAY_TASK_ID}"
 CACHE=/private/groups/yehlab/wsobolew/.boltz_cache_shared

@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=uma-inv-v5-stage2-resume4
-#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_out/v5_train_%j.out
-#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_err/v5_train_%j.err
+#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_out/v5_train_%j.out
+#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_err/v5_train_%j.err
 #SBATCH --time=72:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=4
@@ -13,7 +13,7 @@
 #SBATCH --mail-user=wsobolew@ucsc.edu
 
 set -e
-cd /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2
+cd /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse
 
 export WANDB_API_KEY="${WANDB_API_KEY:?WANDB_API_KEY not set — add it to ~/.bashrc}"
 

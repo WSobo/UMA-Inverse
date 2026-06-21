@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=uma-distal-byclass
-#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_out/distal_byclass_%j.out
-#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_err/distal_byclass_%j.err
+#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_out/distal_byclass_%j.out
+#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_err/distal_byclass_%j.err
 #SBATCH --time=12:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
@@ -21,7 +21,7 @@
 #   SKIP_LMPNN=1 ... to run UMA-only.
 
 set -e
-cd /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2
+cd /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 CKPT="${CKPT:-checkpoints/pairmixerinv-v5-stage3-nodes384-ddp2/epoch_snapshots/epoch-11.ckpt}"

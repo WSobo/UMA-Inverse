@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=uma-runA-distogram
-#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_out/runA_%j.out
-#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_err/runA_%j.err
+#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_out/runA_%j.out
+#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_err/runA_%j.err
 #SBATCH --time=24:00:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=12
@@ -12,7 +12,7 @@
 #SBATCH --mail-user=wsobolew@ucsc.edu
 
 set -e
-cd /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2
+cd /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse
 
 export WANDB_API_KEY="${WANDB_API_KEY:?WANDB_API_KEY not set — add it to ~/.bashrc}"
 

@@ -36,7 +36,10 @@ dependencies = [
     "matplotlib>=3.10.8",
     "numpy>=2.0",
     "omegaconf>=2.3",
-    "pandas>=3.0.2",
+    # Floor relaxed from 3.0.2 so the serving extra can use Gradio 5.x (which
+    # caps pandas<3). Training (uv sync, no gradio) still resolves pandas 3.x;
+    # only the Gradio-5 serving container pins pandas 2.x.
+    "pandas>=2.2",
     "pyarrow>=24.0.0",
     "pytorch-lightning>=2.4",
     "rdkit>=2026.3.2",
@@ -53,11 +56,28 @@ dev = [
     "pytest-cov>=5.0",
     "ruff>=0.7",
 ]
+# Serving / observability layer (CPU inference service + Gradio UI + MCP tool).
+# Kept out of the core deps so the training environment stays lean. The
+# container installs CPU-only torch (see Dockerfile) rather than the cu124
+# wheel pinned in [tool.uv.sources] above.
+serving = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    # Pin to Gradio 5.x: `>=5.0` resolved to the bleeding-edge v6, which is
+    # flaky mounted on FastAPI behind the HF Spaces Docker proxy. 5.x is the
+    # battle-tested line for mount_gradio_app on Spaces.
+    "gradio>=5.0,<6",
+    "prometheus-client>=0.21",
+    "structlog>=24.4",
+    "pydantic>=2.9",
+    "httpx>=0.27",
+    "fastmcp>=2.0",
+]
 
 [project.urls]
 Repository = "https://github.com/WSobo/UMA-Inverse"
 Preprint   = "https://www.biorxiv.org/content/<TBD>"
-Weights    = "https://huggingface.co/WSobo/UMA-Inverse_v2"
+Weights    = "https://huggingface.co/WSobo/UMA-Inverse"
 Issues     = "https://github.com/WSobo/UMA-Inverse/issues"
 
 [project.scripts]

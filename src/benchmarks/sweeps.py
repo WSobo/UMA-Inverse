@@ -21,8 +21,8 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-import torch
 import numpy as np
+import torch
 
 from src.benchmarks.evaluation import evaluate_validation_set
 from src.benchmarks.metrics import hamming_diversity, recovery_rate

@@ -34,24 +34,29 @@ The PDB parsing code (`parse_PDB`, `featurize`) has been vendorized into `src/da
 
 ## Repository Layout
 ```
-configs/          # Hydra config surface (config.yaml is the root)
+configs/          # Hydra config surface (config.yaml = the v5 architecture)
   config.yaml     # Main config: paths, training, data, model, wandb
-  data/           # Data hyperparams (batch_size, max_total_nodes, etc.)
-  model/          # PairMixer architecture hyperparams
-  trainer/        # PyTorch Lightning trainer settings
+  data/ model/ trainer/   # Grouped hyperparams
+  old_configs/    # Archived earlier configs (v1, v3) for reference
 src/
-  data/           # LigandMPNN bridge + PyTorch Lightning DataModule
+  data/           # LigandMPNN bridge, DataModule, vendored PDB parser
   models/         # RBFEmbedding, PairMixerBlock, UMAInverse model
-  training/       # UMAInverseLightningModule (train/val step, optimizer)
-  utils/          # FASTA I/O helpers
+  training/       # UMAInverseLightningModule + distogram aux head
+  inference/      # InferenceSession, decoding, constraints, weights; CLI (`uma-inverse`)
+  benchmarks/     # Interface-recovery evaluation + metrics
+  serving/        # FastAPI REST + Gradio UI + Prometheus/structlog (CPU service)
+  mcp/            # MCP server: design/score as agent tools (talks to the REST API)
+  utils/          # FASTA / token I/O helpers
 scripts/
-  train.py        # Hydra training entry point
-  inference.py    # Inference CLI (--pdb, --ckpt, --out_fasta)
-  pilot_run.py    # Single-batch overfit sanity check
-  preprocess.py   # Batch PDB → .pt tensor cache
-  download_json_pdbs.py  # Fetch PDBs from RCSB
+  train.py · pilot_run.py · preprocess.py · preprocess_v5.py  # train + data prep
+  download_json_pdbs.py · download_weights.py                 # fetch PDBs / HF weights
+  precompute_examples.py                                      # cache serving demo results
+  benchmark_interface_recovery.py · …                         # paper metrics
   SLURM/          # sbatch wrappers for each stage
-tests/            # pytest unit/integration tests (CPU-only)
+  paper/          # preprint figure + table generation
+tests/            # pytest unit/integration (CPU-only); incl. tests/test_serving/
+Dockerfile · deploy/hf_space/   # CPU serving image + HF Spaces (Docker SDK) deploy
+.github/workflows/ci.yml        # CI: ruff + pytest + docker-build (all CPU)
 ```
 
 ## Workflow (Order of Operations)
@@ -61,17 +66,22 @@ tests/            # pytest unit/integration tests (CPU-only)
 02   make pilot         # srun:   1-batch overfit sanity check
 03   make train         # sbatch: 3-stage curriculum training (nodes 64→128→384)
 04   make inference PDB=path/to/file.pdb   # srun: design sequences → FASTA
+                        #   (or: uv run uma-inverse design --pdb ...)
+05   make serve         # CPU REST + Gradio service on :7860 (no srun); `make mcp` = agent tool
 ```
 
 ## Key Config Parameters
-All Hydra overrides use `++key=value` syntax on the CLI.
+All Hydra overrides use `++key=value` syntax on the CLI. `configs/config.yaml` is
+now the **v5 architecture** — any served/inferred checkpoint must match it.
 
 | Parameter | Default | Notes |
 |-----------|---------|-------|
 | `data.max_total_nodes` | 384 | Curriculum stages: 64 → 128 → 384 |
-| `data.ligand_context_atoms` | 25 | Max ligand atoms kept |
+| `data.ligand_context_atoms` | 50 | Max ligand atoms kept (v5 raised 25 → 50 for DNA/RNA) |
+| `data.ligand_featurizer` | ligandmpnn_atomic | v5 atomic featurizer (`ligand_in.proj`) |
+| `data.frame_relative_angles` | true | v5 per-(residue, ligand) bearing angles |
+| `data.pair_distance_atoms` | backbone_full_25 | v5 multi-atom residue–residue distances |
 | `training.lr` | 3e-4 | AdamW learning rate |
-| `training.epochs` | 10 | Overridden per curriculum stage |
 | `model.num_pairmixer_blocks` | 6 | Encoder depth |
 | `model.pair_dim` | 128 | Pair tensor channel dimension |
 | `wandb.enabled` | false | Set true to enable W&B logging |
@@ -82,4 +92,7 @@ All Hydra overrides use `++key=value` syntax on the CLI.
 - **Tests:** pytest (`make test` / `make test-fast`)
 - **Build:** hatchling (wheels from `src/` only)
 - **Dev extras:** `uv sync --extra dev`
+- **Serving:** `uv sync --extra serving`; `make serve` (REST+UI), `make mcp` (agent tool),
+  `make docker-build` (CPU image). Weights auto-fetch from HF (`WSobo/UMA-Inverse`); deploy
+  steps in `docs/DEPLOY.md`. Serving runs OFF the SLURM cluster — plain commands, no `srun`.
 

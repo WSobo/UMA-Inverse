@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=ligmpnn-pocket-fixed
-#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_out/ligmpnn_pocket_%j.out
-#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_err/ligmpnn_pocket_%j.err
+#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_out/ligmpnn_pocket_%j.out
+#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_err/ligmpnn_pocket_%j.err
 #SBATCH --time=4:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
@@ -27,7 +27,7 @@ set -e
 eval "$(micromamba shell hook --shell bash)"
 micromamba activate ligandmpnn_env
 
-PROJ=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2
+PROJ=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse
 LIGANDMPNN_DIR=/private/groups/yehlab/wsobolew/01_software/LigandMPNN
 INPUTS_DIR="${PROJ}/outputs/preprint/ligandmpnn_inputs"
 OUT_DIR="${PROJ}/outputs/preprint/ligandmpnn_pocket_fixed"

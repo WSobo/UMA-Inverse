@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=pocket-designs-ext-v5
-#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_out/pocket_designs_ext_%j.out
-#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_err/pocket_designs_ext_%j.err
+#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_out/pocket_designs_ext_%j.out
+#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_err/pocket_designs_ext_%j.err
 #SBATCH --time=6:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -19,7 +19,7 @@
 # already-cofolded 35 stay reusable. Same ckpt/config/T/seed as the original 35.
 
 set -e
-PROJ=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2
+PROJ=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse
 cd "$PROJ"
 EXT=outputs/preprint/pdb_selection_extended_v5.json
 

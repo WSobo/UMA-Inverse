@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=uma-inv-v4-pilot
-#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_out/v4_pilot_%j.out
-#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_err/v4_pilot_%j.err
+#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_out/v4_pilot_%j.out
+#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_err/v4_pilot_%j.err
 #SBATCH --time=06:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=2
@@ -13,7 +13,7 @@
 #SBATCH --mail-user=wsobolew@ucsc.edu
 
 set -e
-cd /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2
+cd /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse
 
 # v4 3-stage pilot, 2×A100. Same convergence gate as v3 pilot:
 # each stage must reach train/loss<0.3, train/acc>0.85.

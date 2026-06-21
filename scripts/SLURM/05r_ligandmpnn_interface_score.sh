@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=lmpnn-iface-score
-#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_out/lmpnn_iface_score_%j.out
-#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_err/lmpnn_iface_score_%j.err
+#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_out/lmpnn_iface_score_%j.out
+#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_err/lmpnn_iface_score_%j.err
 #SBATCH --time=12:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -21,7 +21,7 @@
 # UMA v5-test_<cls> dirs so the figures can read both with one code path.
 
 set -e
-PROJ=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2
+PROJ=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse
 cd "$PROJ"
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 

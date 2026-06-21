@@ -12,7 +12,7 @@ import argparse
 from pathlib import Path
 
 import matplotlib.pyplot as plt
-from matplotlib.patches import FancyBboxPatch, FancyArrowPatch, Rectangle
+from matplotlib.patches import FancyArrowPatch, FancyBboxPatch, Rectangle
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
@@ -61,7 +61,9 @@ def main() -> None:
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
     fig, ax = plt.subplots(figsize=(FIG_W, FIG_H))
-    ax.set_xlim(0, 1); ax.set_ylim(0, 1); ax.axis("off")
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.axis("off")
 
     yc, h = 0.46, 0.30   # main row center / box height
 

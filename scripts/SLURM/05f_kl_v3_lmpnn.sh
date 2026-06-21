@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=uma-kl-ref
-#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_out/kl_ref_%j.out
-#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_err/kl_ref_%j.err
+#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_out/kl_ref_%j.out
+#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_err/kl_ref_%j.err
 #SBATCH --time=04:00:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
@@ -30,7 +30,7 @@
 #   sbatch --export=ALL,KL_MODE=lmpnn scripts/SLURM/05f_kl_v3_lmpnn.sh
 
 set -e
-NEW=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2
+NEW=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse
 OLD=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse
 
 MODE="${KL_MODE:-v3}"

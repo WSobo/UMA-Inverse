@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=distal-kl
-#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_out/distal_kl_%j.out
-#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_err/distal_kl_%j.err
+#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_out/distal_kl_%j.out
+#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_err/distal_kl_%j.err
 #SBATCH --time=12:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
@@ -28,7 +28,7 @@
 
 set -e
 
-PROJ=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2
+PROJ=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse
 cd "${PROJ}"
 
 # Defaults — override via sbatch --export

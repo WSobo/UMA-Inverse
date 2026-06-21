@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=uma-cofold-v5
-#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_out/cofold_v5_%j.out
-#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_err/cofold_v5_%j.err
+#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_out/cofold_v5_%j.out
+#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_err/cofold_v5_%j.err
 #SBATCH --time=24:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -22,7 +22,7 @@
 # LigandMPNN arm is unavailable; empty arm dirs are skipped.
 
 set -e
-PROJ=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2
+PROJ=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse
 cd "${PROJ}"
 
 INPUT_BASE="${PROJ}/outputs/preprint/boltz_inputs/cofold"

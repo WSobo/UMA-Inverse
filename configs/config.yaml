@@ -1,15 +1,20 @@
-project_name: Uma-Inverse
-run_name: pairmixerinv-v2
+project_name: UMA-Inverse
+run_name: pairmixerinv-v5
 seed: 42
+
+# Benchmark/inference config matching the v5 Stage-3 training featurization
+# (scripts/SLURM/04c_v5_train_stage3_ddp.sh). Identical to config_v3.yaml
+# EXCEPT ligand_context_atoms: 50 (v5 raised M=25 -> 50 to fit DNA/RNA and
+# larger ligands). The trunk architecture is unchanged from v3/v4, so the v5
+# checkpoint's trunk loads fully; the training-only distogram aux head is
+# dropped by InferenceSession's strict=False loader. v5's rich-ligand and
+# bond-topology layers were trained OFF, so they are absent here too.
 
 paths:
   train_json: LigandMPNN/training/train.json
   valid_json: LigandMPNN/training/valid.json
   pdb_dir: data/raw/pdb_archive
   output_dir: outputs
-  # Override to point training at the v5 cache (data/processed_v5/).
-  # null → datamodule falls back to data/processed/, the v4 cache.
-  processed_dir: null
 
 training:
   lr: 3e-4
@@ -22,20 +27,15 @@ training:
   log_every_n_steps: 20
   accumulate_grad_batches: 1
   compile_model: false
-  # Per-stage overrides in scripts/SLURM/03_train_model.sh tune these to each
-  # stage's actual step budget. The defaults below are sized for a single
-  # stage-1 run at bsz=8 (~280K steps for 15 epochs at ~145K samples/epoch)
-  # so that ad-hoc `train.py` invocations don't silently freeze the LR.
   warmup_steps: 1000
   T_max: 280000
   early_stop_patience: 10
-  # v3 phase 4 — Gaussian σ (Å) noise added to raw residue + ligand coords
-  # at the top of forward(), training-only. 0.0 disables. v3 default = 0.1.
+  # Training-only coord noise; disabled for inference/benchmark.
   coord_noise_std: 0.0
 
 wandb:
-  enabled: false   # override with ++wandb.enabled=true in private SLURM scripts
-  mode: online
+  enabled: false
+  mode: offline
 
 model:
   residue_input_dim: 6
@@ -50,82 +50,40 @@ model:
   dropout: 0.1
   gradient_checkpointing: false
   thermal_noise_std: 0.0
-  # v2 featurizer flags mirror data.* — the data layer is the authoritative
-  # source of truth; the model reads the same value so train/infer stay aligned.
+  # Data layer is the authoritative source of truth; model mirrors it.
   ligand_featurizer: ${data.ligand_featurizer}
   residue_anchor: ${data.residue_anchor}
   pair_distance_atoms: ${data.pair_distance_atoms}
-  # v3 phase 1/2/3/4 mirrors — data layer is authoritative.
   pair_distance_atoms_ligand: ${data.pair_distance_atoms_ligand}
   frame_relative_angles: ${data.frame_relative_angles}
   intra_ligand_multidist: false
   coord_noise_std: ${training.coord_noise_std}
-  # v5 mirrors — data layer is authoritative; model reads these to know
-  # which optional layers to instantiate at checkpoint load time.
-  ligand_rich_features: ${data.ligand_rich_features}
-  ligand_bond_topology: ${data.ligand_bond_topology}
-  # v5 phase A — distogram auxiliary head on residue-residue Z_ij.
-  # Single Linear(pair_dim, distogram_num_bins) trained jointly with the
-  # CE loss at weight distogram_aux_weight (total = ce + λ * aux).
-  # Targets the encoder_weak verdict from the v3 distogram probe
-  # (top1 0.266). Default off → v4 trains unchanged. The head is
-  # training-only — not used at inference and ignored by
-  # InferenceSession's strict=False checkpoint loader.
-  distogram_aux_weight: 0.0
-  distogram_num_bins: 38
 
+# v5 featurization — matches the 04c_v5_train_stage3_ddp.sh ++data.* overrides,
+# with training-only augmentations (sidechain_context_rate) left at their
+# inference no-op values.
 data:
   batch_size: 8
   num_workers: 8
   pin_memory: true
-  ligand_context_atoms: 25
+  # v5: M raised to 50 to fit DNA/RNA and larger ligands (v3/v4 used 25).
+  ligand_context_atoms: 50
   cutoff_for_score: 8.0
   max_total_nodes: 384
-  # v2 phase 1 — "onehot6" = v1 6-bin element one-hot.
-  # "atomic_number_embedding" = per-element learnable embedding over atomic
-  # numbers (slot 0 padding, 1-118 periodic table, 119 unknown). v2 default.
-  ligand_featurizer: atomic_number_embedding
-  # v2 phase 2 — "ca" = v1 (Cα is the residue anchor for pair-tensor distance).
-  # "cb" = virtual Cβ via the ProteinMPNN formula (N, CA, C → Cβ) so
-  # residue-ligand distances are measured from the sidechain stub rather than
-  # the backbone. v2 default.
+  # LigandMPNN-faithful element featurizer (atomic_num + group + period).
+  ligand_featurizer: ligandmpnn_atomic
   residue_anchor: cb
-  # v2 phase 3 — "anchor_only" = v1 (single-atom pairwise distance over the
-  # concatenated residue+ligand coordinate tensor). "backbone_full" = the
-  # residue-residue [L,L] block uses 5 backbone-pair distances (Cα-Cα, Cα-N,
-  # Cα-C, N-O, O-C) stacked and re-projected; [L,M]/[M,L]/[M,M] blocks stay
-  # single-atom (ligand atoms have no backbone analogue). Phase 2 still
-  # governs the residue-ligand anchor under backbone_full. v2 default.
-  pair_distance_atoms: backbone_full
-  # v3 phase 1 — when "backbone_full", the residue-ligand [L,M]/[M,L] block
-  # uses 5 backbone-atom × ligand-atom distances instead of the single
-  # Cβ-anchor. "anchor_only" keeps v2 behaviour (single-atom). v3 default =
-  # "backbone_full".
-  pair_distance_atoms_ligand: anchor_only
-  # v3 phase 2 — per-(residue, ligand atom) sin/cos features describing the
-  # ligand atom's bearing in the residue's local N-Cα-C frame, concatenated
-  # into the [L,M] pair-tensor block. v3 default = true.
-  frame_relative_angles: false
-  # v3 phase 5 — when true, the parser/cache emits per-residue sidechain
-  # heavy-atom tensors. Required for sidechain_context_rate > 0 (the
-  # geometric augmentation appends a random fraction of these atoms to
-  # ligand_coords during training). v3 default = true.
-  return_sidechain_atoms: false
-  # v3 phase 5 — fraction of designable residues whose sidechain heavy atoms
-  # are appended to ligand_coords during training (forces the model to handle
-  # conditional decoding from real sidechain geometry, à la LigandMPNN's
-  # use_side_chains). Train-only. v3 default = 0.03.
-  sidechain_context_rate: 0.0
-  # v5 — RDKit-derived per-atom chemistry features (hybridization, formal
-  # charge, H-bond donor/acceptor, aromaticity, ring membership, degree).
-  # 22-dim float tensor per ligand atom, projected additively onto node repr.
-  # Requires RDKit; falls back to on-the-fly computation when cache misses.
-  # For DNA/RNA-rich structures, consider raising ligand_context_atoms to 50+.
-  ligand_rich_features: false
-  # v5 — covalent bond topology: [M, M] int8 bond-type matrix (0=none,
-  # 1=single, 2=double, 3=triple, 4=aromatic) injected into the [M,M] block
-  # of the pair tensor via a learned 5-class embedding.
-  ligand_bond_topology: false
+  # Full LigandMPNN 25-distance backbone-pair set in the L-L block.
+  pair_distance_atoms: backbone_full_25
+  # 5 backbone-atom x ligand-atom distances in the L-M / M-L blocks.
+  pair_distance_atoms_ligand: backbone_full
+  # Per-(residue, ligand-atom) frame-relative sin/cos features in L-M.
+  frame_relative_angles: true
+  # Parser emits per-residue sidechain heavy atoms (needed by the training
+  # augmentation; no-op at inference).
+  return_sidechain_atoms: true
+  # Training-time augmentation rate; ignored at inference.
+  sidechain_context_rate: 0.03
 
 inference:
   temperature: 0.1

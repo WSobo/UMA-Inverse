@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Ruff
+        run: uvx ruff check src/ scripts/ tests/
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Set up Python
+        run: uv python install 3.13
+      - name: Create venv
+        run: uv venv
+      - name: Install CPU torch (no CUDA)
+        # The project pins the cu124 wheel for GPU training; CI is CPU-only.
+        run: uv pip install --index-url https://download.pytorch.org/whl/cpu "torch>=2.5"
+      - name: Install project (dev + serving)
+        run: uv pip install ".[dev,serving]"
+      - name: Run tests
+        # Integration tests that load the real checkpoint stay skipped
+        # (UMA_RUN_SERVING_INTEGRATION unset).
+        run: uv run --no-sync pytest tests/ -v
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build serving image (proves reproducibility; no push)
+        run: docker build -t uma-inverse-serving:ci .
+      - name: Verify image is CPU-only (no CUDA wheels)
+        run: |
+          docker run --rm uma-inverse-serving:ci \
+            python -c "import torch; assert '+cpu' in torch.__version__ or not torch.version.cuda, torch.__version__; print('CPU torch OK:', torch.__version__)"

@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=lmpnn-iface-designs
-#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_out/lmpnn_iface_designs_%j.out
-#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_err/lmpnn_iface_designs_%j.err
+#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_out/lmpnn_iface_designs_%j.out
+#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_err/lmpnn_iface_designs_%j.err
 #SBATCH --time=8:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -21,7 +21,7 @@
 # --ligandmpnn-seqs-dir (identical interface mask + per-PDB-median aggregation).
 
 set -e
-PROJ=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2
+PROJ=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse
 cd "$PROJ"
 LIGDIR=/private/groups/yehlab/wsobolew/01_software/LigandMPNN
 CKPT="$LIGDIR/model_params/ligandmpnn_v_32_010_25.pt"

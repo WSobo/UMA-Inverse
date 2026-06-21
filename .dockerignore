@@ -1,0 +1,29 @@
+# Keep the build context small (HF Spaces free-tier build limits).
+# The image only needs src/, configs/, pyproject.toml, README.md.
+.git
+.github
+.claude
+.venv
+__pycache__
+**/__pycache__
+*.pyc
+
+# Reference implementations — never needed at serve time (vendored into src/).
+LigandMPNN/
+Struct2Seq-GNN/
+UMA-Fold/
+
+# Data, outputs, checkpoints, logs — never baked into the image.
+data/
+outputs/
+checkpoints/
+logs/
+wandb/
+*.ckpt
+*.pt
+
+# Docs, tests, notebooks
+docs/
+tests/
+scripts/SLURM/
+*.ipynb

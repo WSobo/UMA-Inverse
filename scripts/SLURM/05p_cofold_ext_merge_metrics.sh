@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=cofold-ext-merge
-#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_out/cofold_ext_merge_%j.out
-#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_err/cofold_ext_merge_%j.err
+#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_out/cofold_ext_merge_%j.out
+#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_err/cofold_ext_merge_%j.err
 #SBATCH --time=2:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -14,7 +14,7 @@
 # CPU-only. Runs afterany the array so it summarizes whatever completed.
 
 set -e
-PROJ=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2
+PROJ=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse
 cd "$PROJ"
 COMB=outputs/preprint/pdb_selection_combined_v5.json
 

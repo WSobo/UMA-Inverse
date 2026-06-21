@@ -49,15 +49,15 @@ for split in SPLITS:
     lmp = load(BENCH / f"ligandmpnn-test_{split}" / "per_pdb.csv")
     shared = sorted(set(uma) & set(lmp))
     u = np.array([uma[p] for p in shared])
-    l = np.array([lmp[p] for p in shared])
-    diff = u - l
-    w = wilcoxon(u, l, alternative="two-sided")
+    lm = np.array([lmp[p] for p in shared])
+    diff = u - lm
+    w = wilcoxon(u, lm, alternative="two-sided")
     du_lo, du_hi = boot_mean_ci(diff)
     u_lo, u_hi = boot_mean_ci(u)
-    l_lo, l_hi = boot_mean_ci(l)
+    l_lo, l_hi = boot_mean_ci(lm)
     print(f"\n[{split}]  N_paired={len(shared)}  (UMA-only={len(uma)}, LMPNN-only={len(lmp)})")
     print(f"  UMA-Inverse  mean={u.mean()*100:.1f}%  95% CI [{u_lo*100:.1f}, {u_hi*100:.1f}]")
-    print(f"  LigandMPNN   mean={l.mean()*100:.1f}%  95% CI [{l_lo*100:.1f}, {l_hi*100:.1f}]")
+    print(f"  LigandMPNN   mean={lm.mean()*100:.1f}%  95% CI [{l_lo*100:.1f}, {l_hi*100:.1f}]")
     print(f"  paired diff (UMA - LMPNN)  mean={diff.mean()*100:+.1f} pp  "
           f"95% CI [{du_lo*100:+.1f}, {du_hi*100:+.1f}]")
     print(f"  Wilcoxon  W={w.statistic:.1f}  p={w.pvalue:.2e}  "

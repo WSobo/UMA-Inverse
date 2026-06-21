@@ -149,7 +149,8 @@ def main() -> None:
     out_csv = args.out_dir / "shell_recovery_comparison.csv"
     with out_csv.open("w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(combined_rows[0].keys()))
-        w.writeheader(); w.writerows(combined_rows)
+        w.writeheader()
+        w.writerows(combined_rows)
     logger.info("wrote %s", out_csv)
 
     # ── Headline numbers ──────────────────────────────────────────────────────
@@ -180,7 +181,8 @@ def main() -> None:
         fig, ax = plt.subplots(figsize=(8, 5))
         ax.bar(x - w/2, uma_rec, w, label="UMA-Inverse v3 (teacher-forced)", color="#4C72B0")
         ax.bar(x + w/2, lmp_rec, w, label="LigandMPNN (AR T=0.1)", color="#DD8452")
-        ax.set_xticks(x); ax.set_xticklabels(shells, rotation=15, ha="right")
+        ax.set_xticks(x)
+        ax.set_xticklabels(shells, rotation=15, ha="right")
         ax.set_ylabel("Sequence recovery")
         ax.set_ylim(0, 1)
         ax.set_title("Recovery by distance-to-ligand shell\n"

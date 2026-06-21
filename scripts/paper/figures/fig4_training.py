@@ -80,8 +80,8 @@ def main() -> None:
         by_epoch: dict[int, tuple[float, float]] = {}
         for version in versions:
             metrics_csv = args.logs_dir / f"pairmixerinv-v5-{stage_name}" / version / "metrics.csv"
-            e, a, l = _load_val_curve(metrics_csv)
-            for ep, acc, loss in zip(e, a, l):
+            e, a, losses = _load_val_curve(metrics_csv)
+            for ep, acc, loss in zip(e, a, losses):
                 by_epoch[ep] = (acc, loss)
         epochs = sorted(by_epoch)
         val_acc = [by_epoch[ep][0] for ep in epochs]

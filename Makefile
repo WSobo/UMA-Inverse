@@ -66,6 +66,10 @@ help:
 	@echo "  make test-fast      Run pytest, stop on first failure (srun, CPU)"
 	@echo "  make lint           Run ruff linter (srun, CPU)"
 	@echo "  make lint-fix       Run ruff linter with auto-fix (srun, CPU)"
+	@echo "  make serve          Run the CPU REST + Gradio service locally (:7860, no srun)"
+	@echo "  make mcp            Run the MCP agent server (talks to the REST API)"
+	@echo "  make docker-build   Build the CPU serving image"
+	@echo "  make precompute-examples  Cache bundled-example results for a snappy UI"
 	@echo "  make env-check      Verify uv env + torch/CUDA (srun GPU)"
 	@echo "  make jobs           List your queued/running SLURM jobs"
 	@echo "  ─────────────────────────────────────────────────────────"
@@ -183,23 +187,59 @@ benchmark:
 
 
 # ==============================================================================
+# SERVING (CPU service — local / Docker / HF Spaces, NOT the SLURM cluster)
+# ==============================================================================
+# These run on a normal machine (laptop, container, or the Space), not on the
+# HPC cluster, so they are plain commands — no srun wrapping.
+
+PORT ?= 7860
+
+# The canonical HF weights are now the v5 model (see src/inference/weights.py),
+# so `make serve` auto-fetches them on first run — no checkpoint flag needed
+# (config.yaml is already the v5 arch). Pin a local file for speed/offline use:
+#   make serve UMA_CKPT=checkpoints/uma-inverse-v5.ckpt
+UMA_CKPT ?=
+
+.PHONY: serve
+serve:
+	UMA_CKPT=$(UMA_CKPT) uv run --extra serving uvicorn src.serving.app:app --host 0.0.0.0 --port $(PORT)
+
+.PHONY: docker-build
+docker-build:
+	docker build -t uma-inverse-serving .
+
+.PHONY: docker-run
+docker-run:
+	docker run --rm -p $(PORT):7860 uma-inverse-serving
+
+.PHONY: mcp
+mcp:
+	uv run --extra serving python -m src.mcp.server
+
+# Precompute bundled-example results (loads the model → run where torch lives).
+.PHONY: precompute-examples
+precompute-examples:
+	$(SRUN_CPU) bash -c 'cd $(CURDIR) && UMA_MAX_RESIDUES=1000 UMA_CKPT=$(UMA_CKPT) uv run python scripts/precompute_examples.py'
+
+
+# ==============================================================================
 # TESTING & LINTING (CPU only — no GPU needed)
 # ==============================================================================
 .PHONY: test
 test:
-	$(SRUN_CPU) bash -c 'cd $(CURDIR) && uv run --extra dev python -m pytest tests/ -v --tb=short'
+	$(SRUN_CPU) bash -c 'cd $(CURDIR) && uv run --extra dev --extra serving python -m pytest tests/ -v --tb=short'
 
 .PHONY: test-fast
 test-fast:
-	$(SRUN_CPU) bash -c 'cd $(CURDIR) && uv run --extra dev python -m pytest tests/ -v --tb=short -x'
+	$(SRUN_CPU) bash -c 'cd $(CURDIR) && uv run --extra dev --extra serving python -m pytest tests/ -v --tb=short -x'
 
 .PHONY: lint
 lint:
-	$(SRUN_CPU) bash -c 'cd $(CURDIR) && uv run --extra dev ruff check src/ scripts/ tests/'
+	$(SRUN_CPU) bash -c 'cd $(CURDIR) && uv run --extra dev --extra serving ruff check src/ scripts/ tests/'
 
 .PHONY: lint-fix
 lint-fix:
-	$(SRUN_CPU) bash -c 'cd $(CURDIR) && uv run --extra dev ruff check --fix src/ scripts/ tests/'
+	$(SRUN_CPU) bash -c 'cd $(CURDIR) && uv run --extra dev --extra serving ruff check --fix src/ scripts/ tests/'
 
 
 # ==============================================================================

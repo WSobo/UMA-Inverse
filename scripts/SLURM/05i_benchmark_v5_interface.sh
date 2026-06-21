@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=uma-bench-v5-iface
-#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_out/bench_v5iface_%j.out
-#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_err/bench_v5iface_%j.err
+#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_out/bench_v5iface_%j.out
+#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_err/bench_v5iface_%j.err
 #SBATCH --time=48:00:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
@@ -28,7 +28,7 @@
 # by the strict=False inference loader (verified: trunk loads 257/257).
 
 set -e
-cd /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2
+cd /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse
 
 # expandable_segments avoids the CUDA OOM fragmentation seen on the 24 GB A5500
 # for large complexes at M=50 (a 790 MiB alloc failed with 681 MiB free).

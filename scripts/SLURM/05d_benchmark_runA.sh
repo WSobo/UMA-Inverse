@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=uma-bench-runA
-#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_out/bench_runA_%j.out
-#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_err/bench_runA_%j.err
+#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_out/bench_runA_%j.out
+#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_err/bench_runA_%j.err
 #SBATCH --time=24:00:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
@@ -11,9 +11,9 @@
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=wsobolew@ucsc.edu
 
-# ── Run A before/after benchmark wrapper (UMA-Inverse-2) ──────────────────────
+# ── Run A before/after benchmark wrapper (UMA-Inverse) ──────────────────────
 # NOTE: corrected paths — the stock scripts/SLURM/05_benchmark.sh still cd's to
-# the OLD repo (…/UMA-Inverse, not …/UMA-Inverse-2).
+# the OLD repo (…/UMA-Inverse, not …/UMA-Inverse).
 #
 # --config configs/config_v3.yaml is REQUIRED: InferenceSession builds the model
 # architecture from the config YAML (not the ckpt) and loads weights strict=False
@@ -32,7 +32,7 @@
 #BENCH_RUN_NAME=runA-distogram-ep3 scripts/SLURM/05d_benchmark_runA.sh
 
 set -e
-cd /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2
+cd /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse
 
 BENCH_CKPT="${BENCH_CKPT:-checkpoints/runA_v4_stage3_ep6_init.ckpt}"
 BENCH_CONFIG="${BENCH_CONFIG:-configs/config_v3.yaml}"

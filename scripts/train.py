@@ -267,6 +267,7 @@ def main(cfg: DictConfig) -> None:
     _strategy = "auto"
     if _devices > 1:
         from datetime import timedelta
+
         from pytorch_lightning.strategies import DDPStrategy
         _strategy = DDPStrategy(timeout=timedelta(hours=2))
 

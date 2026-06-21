@@ -57,7 +57,6 @@ def main() -> None:
 
     df = pd.read_csv(args.metrics)
 
-    src_cols = [c for c, _ in BEST_METRICS] + [c for c, _ in DIRECT_METRICS]
     grouped = df.groupby(["pdb_id", "kind", "method"], sort=True)
 
     out_rows = []

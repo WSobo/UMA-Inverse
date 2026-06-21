@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=uma-bench-v5-full
-#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_out/bench_v5full_%j.out
-#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_err/bench_v5full_%j.err
+#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_out/bench_v5full_%j.out
+#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_err/bench_v5full_%j.err
 #SBATCH --time=18:00:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
@@ -28,7 +28,7 @@
 # {0.0,0.1,0.2}, 3 samples/PDB, ablation skipped. ~5-7 h on an A5500.
 
 set -e
-cd /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2
+cd /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse
 
 # expandable_segments avoids CUDA OOM fragmentation on the 24 GB A5500 for large
 # complexes at M=50 (seen in the n=5 smoke test).

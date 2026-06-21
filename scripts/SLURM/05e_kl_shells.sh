@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=uma-kl-shells
-#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_out/kl_shells_%j.out
-#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2/logs/SLURM_err/kl_shells_%j.err
+#SBATCH --output=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_out/kl_shells_%j.out
+#SBATCH --error=/private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse/logs/SLURM_err/kl_shells_%j.err
 #SBATCH --time=06:00:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
@@ -33,7 +33,7 @@
 # KL_RUN_NAME=runA-distogram-ep3 scripts/SLURM/05e_kl_shells.sh
 
 set -e
-cd /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse-2
+cd /private/groups/yehlab/wsobolew/02_projects/computational/UMA-Inverse
 
 KL_CKPT="${KL_CKPT:-checkpoints/runA_v4_stage3_ep6_init.ckpt}"
 KL_CONFIG="${KL_CONFIG:-configs/config_v3.yaml}"
