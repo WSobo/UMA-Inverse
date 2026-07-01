@@ -94,5 +94,5 @@ now the **v5 architecture** — any served/inferred checkpoint must match it.
 - **Dev extras:** `uv sync --extra dev`
 - **Serving:** `uv sync --extra serving`; `make serve` (REST+UI), `make mcp` (agent tool),
   `make docker-build` (CPU image). Weights auto-fetch from HF (`WSobo/UMA-Inverse`); deploy
-  steps in `docs/DEPLOY.md`. Serving runs OFF the SLURM cluster — plain commands, no `srun`.
+  steps in `deploy/hf_space/`. Serving runs OFF the SLURM cluster — plain commands, no `srun`.
 

@@ -41,39 +41,14 @@ LigandMPNN/
 Struct2Seq-GNN/
 UMA-Fold/
 
-# Scratch notebooks
+# Notebooks (kept locally, not tracked in repo)
+notebooks/
 ligandMPNN_example_notebook.ipynb
 tea_debug.log
 
-# Local-private docs (preprint source, planning notes — kept locally only)
-docs/private/
-docs/1_preprint_docs/
-docs/v4_plan_draft.md
+# Docs & preprint source (kept locally, not tracked in repo)
+docs/
 ARCHITECTURE_SPEC.md
-
-# Preprint (kept locally, not tracked in repo)
-docs/preprint*.tex
-docs/preprint*.pdf
-docs/preprint*.aux
-docs/preprint*.bbl
-docs/preprint*.blg
-docs/preprint*.log
-docs/preprint*.out
-docs/preprint_package/
-docs/uma_inverse_preprint.tar.gz
-docs/references.bib
-
-# LaTeX build artifacts inside docs/*_preprint_package/ (track source only:
-# .tex, .bib, compile.sh, *.md, figures/). The compiled PDF + aux files churn.
-docs/*_preprint_package/*.aux
-docs/*_preprint_package/*.log
-docs/*_preprint_package/*.out
-docs/*_preprint_package/*.bbl
-docs/*_preprint_package/*.blg
-docs/*_preprint_package/*.fls
-docs/*_preprint_package/*.fdb_latexmk
-docs/*_preprint_package/*.synctex.gz
-docs/*_preprint_package/preprint.pdf
 
 # Convenience copy of the pocket-fixed selection (canonical: outputs/preprint/)
 /pdb_selection_combined.json

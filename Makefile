@@ -177,8 +177,8 @@ infer: inference
 
 # ==============================================================================
 # BENCHMARK — submit the full paper-metric pipeline as sbatch.
-# Override via sbatch --export; see scripts/SLURM/05_benchmark.sh and
-# docs/benchmarks.md for the full set of knobs.
+# Override via sbatch --export; see scripts/SLURM/05_benchmark.sh
+# for the full set of knobs.
 # ==============================================================================
 
 .PHONY: benchmark

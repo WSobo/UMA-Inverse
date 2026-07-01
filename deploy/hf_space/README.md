@@ -31,6 +31,6 @@ you would run the same image on a GPU endpoint.
 The model weights (`WSobo/Uma-Inverse-1`) are fetched from the Hugging Face Hub
 at container startup, not baked into the image.
 
-> This README's front-matter is what HF Spaces needs. Deployment instructions
-> for pushing the repository to a Space live in the source repo at
-> `docs/DEPLOY.md`.
+> This README's front-matter is what HF Spaces needs. To deploy, push this
+> directory's contents to a Hugging Face Space (Docker SDK); the weights are
+> pulled from the Hub at startup.

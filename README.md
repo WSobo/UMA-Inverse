@@ -65,7 +65,7 @@ serves the trained model on CPU and exposes it to both humans (Gradio UI) and AI
 agents (MCP tool). It is deploy-ready for **Hugging Face Spaces CPU Basic** (free tier).
 
 - **Live Space:** <https://huggingface.co/spaces/WSobo/uma-inverse>
-  (app: <https://wsobo-uma-inverse.hf.space>) — deploy steps in [`docs/DEPLOY.md`](docs/DEPLOY.md).
+  (app: <https://wsobo-uma-inverse.hf.space>).
 - **Observed CPU latency** (HF Spaces CPU Basic, 2 vCPU): **~50 ms** to design a
   **46-residue** protein (1CRN); model load ~1.1 s. Autoregressive decoding is one
   decoder pass per residue, so latency scales ~linearly with length — a ~140-residue
@@ -147,13 +147,12 @@ uv sync --extra serving
 make serve   # auto-fetches the v5 checkpoint from HF on first run, then serves :7860
 # equivalently (same thing):
 uv run uvicorn src.serving.app:app --host 0.0.0.0 --port 7860
-# pin a local/alternate checkpoint with UMA_CKPT=path/to.ckpt; see docs/DEPLOY.md
+# pin a local/alternate checkpoint with UMA_CKPT=path/to.ckpt
 # or build the CPU image:
 docker build -t uma-inverse-serving . && docker run -p 7860:7860 uma-inverse-serving
 ```
 
-See [`docs/SERVING_NOTES.md`](docs/SERVING_NOTES.md) for the design rationale and
-[`docs/DEPLOY.md`](docs/DEPLOY.md) for the Space deployment steps.
+The `deploy/hf_space/` directory holds the Hugging Face Spaces deployment files.
 
 ---
 
@@ -283,12 +282,8 @@ baseline for ligand-conditioned inverse folding — see the preprint for the ful
 
 ## Development
 
-For training, data prep, and reproducing benchmark numbers:
-
-- [docs/architecture.md](docs/architecture.md) — model internals
-- [docs/inference.md](docs/inference.md) — extended CLI reference
-- [docs/benchmarks.md](docs/benchmarks.md) — benchmark protocol
-- [scripts/paper/](scripts/paper/) — reproduce the bioRxiv preprint experiments
+For training, data prep, and reproducing benchmark numbers, see [`scripts/paper/`](scripts/paper/)
+(reproduce the bioRxiv preprint experiments) and the SLURM wrappers under [`scripts/SLURM/`](scripts/SLURM/).
 
 ```bash
 # Reproduce training (SLURM HPC; v5 stage 3 ran on 2× A100, ~1 week)
