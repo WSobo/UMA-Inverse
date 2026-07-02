@@ -12,6 +12,9 @@ __pycache__/
 .vscode/
 .rtk/
 
+# Claude Code personal/local settings (the shared .claude/settings.json is tracked)
+.claude/settings.local.json
+
 
 # Virtual envs
 .venv/

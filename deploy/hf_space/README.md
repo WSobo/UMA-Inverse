@@ -28,7 +28,7 @@ you would run the same image on a GPU endpoint.
 - **REST:** `POST /design`, `GET /health`, `GET /metrics`, OpenAPI at `/docs`.
 - **Agent:** an MCP tool wraps `/design` — see the source repo's `src/mcp/`.
 
-The model weights (`WSobo/Uma-Inverse-1`) are fetched from the Hugging Face Hub
+The model weights (`WSobo/UMA-Inverse`) are fetched from the Hugging Face Hub
 at container startup, not baked into the image.
 
 > This README's front-matter is what HF Spaces needs. To deploy, push this

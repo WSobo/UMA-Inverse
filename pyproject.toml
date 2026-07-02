@@ -76,7 +76,6 @@ serving = [
 
 [project.urls]
 Repository = "https://github.com/WSobo/UMA-Inverse"
-Preprint   = "https://www.biorxiv.org/content/<TBD>"
 Weights    = "https://huggingface.co/WSobo/UMA-Inverse"
 Issues     = "https://github.com/WSobo/UMA-Inverse/issues"
 

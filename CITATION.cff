@@ -11,7 +11,7 @@ authors:
     orcid: "https://orcid.org/0009-0006-3890-4808"
 license: MIT
 repository-code: "https://github.com/WSobo/UMA-Inverse"
-url: "https://huggingface.co/WSobo/UMA-Inverse_1"
+url: "https://huggingface.co/WSobo/UMA-Inverse"
 keywords:
   - protein-design
   - inverse-folding
