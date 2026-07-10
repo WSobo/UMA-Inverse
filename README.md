@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/WSobo/UMA-Inverse/actions/workflows/ci.yml/badge.svg)](https://github.com/WSobo/UMA-Inverse/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.13%2B-blue)](https://www.python.org/)
+[![arXiv](https://img.shields.io/badge/arXiv-2607.07866-b31b1b.svg)](https://arxiv.org/abs/2607.07866)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Hugging Face Space](https://img.shields.io/badge/%F0%9F%A4%97%20Space-live-yellow)](https://huggingface.co/spaces/WSobo/uma-inverse)
 [![MCP](https://img.shields.io/badge/protocol-MCP-purple)](https://modelcontextprotocol.io)
@@ -9,9 +10,9 @@
 
 **Ligand-conditioned protein inverse folding via dense pair-wise attention.**
 
-Given a fixed protein–ligand backbone, UMA-Inverse predicts per-residue amino-acid identity (20 AA + X) under optional design constraints. The architecture is a single dense PairMixer encoder over the union of residue and ligand-atom nodes — no KNN sparsification — giving every residue a direct edge to every ligand atom, with an auxiliary distogram objective and a learned ligand-attention decoder. It is compact (~3.3 M parameters, MSA-free) and built on the LigandMPNN data protocol (parser, train/valid/test splits); for a controlled comparison we re-run LigandMPNN under our identical protocol rather than relying on published numbers.
+Given a fixed protein–ligand backbone, UMA-Inverse predicts per-residue amino-acid identity (20 AA + X) under optional design constraints. The architecture is a single dense PairMixer encoder over the union of residue and ligand-atom nodes — no KNN sparsification — giving every residue a direct edge to every ligand atom, with an auxiliary distogram objective and a learned ligand-attention decoder. It is compact (~3.3 M parameters) and built on the LigandMPNN data protocol (parser, train/valid/test splits); for a controlled comparison we re-run LigandMPNN under our identical protocol rather than relying on published numbers.
 
-→ Preprint: bioRxiv (link added on submission)
+→ Preprint: [UMA-Inverse: Ligand-Conditioned Protein Inverse Folding with a Distogram-Supervised Dense Pair Encoder](https://doi.org/10.48550/arXiv.2607.07866)
 
 ---
 
@@ -253,7 +254,7 @@ self-attention, no sequence/MSA track) refine every residue–residue and residu
 single `[L+M, L+M]` tensor built from RBF-encoded inter-atom distances. An auxiliary **distogram**
 objective keeps that pair tensor structure-predictive, and the autoregressive decoder reads ligand
 context through a learned, position-specific attention over the pair tensor (rather than a uniform
-mean pool). The model is compact (**~3.3 M parameters**, MSA-free). Decoding is autoregressive over a
+mean pool). The model is compact (**~3.3 M parameters**). Decoding is autoregressive over a
 randomized residue order at `T = 0.1`, matching the LigandMPNN inference protocol.
 
 **Interface sequence recovery** on the LigandMPNN test splits (10 samples/PDB, `T = 0.1`, 5 Å
@@ -283,7 +284,7 @@ baseline for ligand-conditioned inverse folding — see the preprint for the ful
 ## Development
 
 For training, data prep, and reproducing benchmark numbers, see [`scripts/paper/`](scripts/paper/)
-(reproduce the bioRxiv preprint experiments) and the SLURM wrappers under [`scripts/SLURM/`](scripts/SLURM/).
+(reproduce the preprint experiments) and the SLURM wrappers under [`scripts/SLURM/`](scripts/SLURM/).
 
 ```bash
 # Reproduce training (SLURM HPC; v5 stage 3 ran on 2× A100, ~1 week)
@@ -300,13 +301,29 @@ make lint          # ruff
 
 ---
 
+## Paper
+
+**UMA-Inverse: Ligand-Conditioned Protein Inverse Folding with a Distogram-Supervised Dense Pair Encoder**
+William Sobolewski. arXiv:2607.07866 [q-bio.BM], 2026.
+[[abs](https://arxiv.org/abs/2607.07866)] · [[pdf](https://arxiv.org/pdf/2607.07866)]
+
+UMA-Inverse does not outperform LigandMPNN on interface recovery or cofolded ligand pose.
+Its contribution is a compact alternative architecture and a characterization of how a dense
+all-pairs encoder propagates ligand signal to residues far beyond the binding interface.
+
 ## Citation
 
-If you use UMA-Inverse in your work, please cite the preprint:
-
-```
-Sobolewski, W. (2026). UMA-Inverse: Dense Pair-Wise Attention for
-Ligand-Conditioned Protein Sequence Design. bioRxiv (TBD).
+```bibtex
+@misc{sobolewski2026umainverse,
+  title         = {UMA-Inverse: Ligand-Conditioned Protein Inverse Folding
+                   with a Distogram-Supervised Dense Pair Encoder},
+  author        = {Sobolewski, William},
+  year          = {2026},
+  eprint        = {2607.07866},
+  archivePrefix = {arXiv},
+  primaryClass  = {q-bio.BM},
+  doi           = {10.48550/arXiv.2607.07866}
+}
 ```
 
 License: see [LICENSE](LICENSE).
