@@ -262,12 +262,12 @@ def _score_figure(positions: list):
 def _score_fn(pdb_text: str, pdb_file, sequence: str, mode: str):
     pdb_str = _read_pdb(pdb_file, pdb_text)
     if not pdb_str:
-        return "⚠️ Provide a PDB (paste text or upload a file).", None, []
+        return "⚠️ Provide a PDB (paste text or upload a file).", None, [], ""
     seq = (sequence or "").strip() or None
     try:
         result = score_inference(pdb_str, sequence=seq, mode=mode)
     except Exception as exc:  # noqa: BLE001 — surface errors to the UI cleanly
-        return f"❌ {type(exc).__name__}: {exc}", None, []
+        return f"❌ {type(exc).__name__}: {exc}", None, [], ""
 
     M.record_score_metrics(
         n_residues=result.n_residues,
@@ -280,14 +280,29 @@ def _score_fn(pdb_text: str, pdb_file, sequence: str, mode: str):
         f"**recovery:** {result.recovery * 100:.0f}% · "
         f"**{result.n_residues} residues** · {result.inference_ms:.0f} ms · mode={result.mode}"
     )
-    candidates = sorted(
-        (p for p in result.positions if p.top_aa != p.aa), key=lambda p: p.log_prob
-    )[:15]
+    # A "candidate" is a position where the model's top-ranked residue differs
+    # from the current one — i.e. one it would actually change. This is NOT the
+    # same as a low-log-likelihood position: a residue at log-prob −0.3 (p ≈ 0.74)
+    # is still the model's top pick, so it's correctly excluded here.
+    mismatches = [p for p in result.positions if p.top_aa != p.aa]
+    candidates = sorted(mismatches, key=lambda p: p.log_prob)[:15]
     rows = [
         [p.residue_id, p.aa, round(p.log_prob, 2), p.top_aa, round(p.top_prob, 2)]
         for p in candidates
     ]
-    return summary, fig, rows
+    if not mismatches:
+        note = (
+            "✅ **No candidate mutations** — the model's top-ranked residue already "
+            f"matches the current one at all {result.n_residues} scored positions "
+            "(nothing it would change)."
+        )
+    else:
+        note = (
+            f"Showing the {len(rows)} lowest-likelihood of **{len(mismatches)} position(s)** "
+            f"where the model prefers a different residue, out of {result.n_residues} scored. "
+            "These are positions it would change — not merely low-confidence natives."
+        )
+    return summary, fig, rows, note
 
 
 # ── Tab 2: Live metrics ──────────────────────────────────────────────────────────
@@ -650,6 +665,15 @@ def build_ui() -> gr.Blocks:
                 with gr.Column():
                     s_summary = gr.Markdown()
                     s_plot = gr.Plot(label="per-residue log-likelihood")
+                    gr.Markdown(
+                        "**Candidate mutations** — positions where the model's most-likely "
+                        "residue differs from the current one (`prefers` ≠ `current`). "
+                        "`log-prob` is the *current* residue's log-likelihood; the more "
+                        "negative, the more strongly the model favours a different residue. "
+                        "High-confidence natives (e.g. log-prob ≈ −0.3 → p ≈ 0.74) are the "
+                        "model's own top pick, so they are correctly *not* listed here."
+                    )
+                    s_note = gr.Markdown()
                     s_table = gr.Dataframe(
                         headers=["residue", "current", "log-prob", "prefers", "prob"],
                         label="candidate mutations",
@@ -658,7 +682,7 @@ def build_ui() -> gr.Blocks:
             s_btn.click(
                 _score_fn,
                 inputs=[s_pdb_text, s_pdb_file, s_sequence, s_mode],
-                outputs=[s_summary, s_plot, s_table],
+                outputs=[s_summary, s_plot, s_table, s_note],
                 concurrency_limit=1,
             )
             s_fetch_btn.click(_fetch_pdb, inputs=[s_pdb_id], outputs=[s_pdb_text])
