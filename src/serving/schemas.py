@@ -49,6 +49,68 @@ class DesignRequest(BaseModel):
         description="Number of independent sequences to design for the structure.",
     )
 
+    # ── Advanced decoding controls (optional; defaults reproduce prior behaviour) ──
+    top_p: float | None = Field(
+        None,
+        ge=0.0,
+        le=1.0,
+        description="Nucleus (top-p) sampling threshold. None disables it (sample "
+        "from the full temperature-scaled distribution).",
+    )
+    seed: int | None = Field(
+        None,
+        ge=0,
+        description="Base RNG seed for reproducibility. Sample i uses seed + i. "
+        "None draws a fresh random seed each request.",
+    )
+    decoding_order: Literal["random", "left-to-right"] = Field(
+        "random",
+        description="Autoregressive decoding order. 'random' matches LigandMPNN; "
+        "'left-to-right' is deterministic given a seed.",
+    )
+
+    # ── Advanced design constraints (optional; LigandMPNN-style selectors) ─────────
+    fix: str | None = Field(
+        None,
+        description="Residue IDs to lock to their native identity, e.g. 'A23 A24 B10' "
+        "or 'A23,A24,B10'. These positions are excluded from redesign.",
+    )
+    redesign: str | None = Field(
+        None,
+        description="If set, ONLY these residue IDs are designable (all others held "
+        "native). Same selector syntax as 'fix'. Mutually exclusive per-residue with fix.",
+    )
+    design_chains: str | None = Field(
+        None,
+        description="Comma/space-separated chain letters to redesign, e.g. 'A,B'. "
+        "Narrows the designable set to these chains.",
+    )
+    bias: str | None = Field(
+        None,
+        description="Global amino-acid logit bias, e.g. 'W:3.0,A:-1.0' (added to logits "
+        "before softmax; positive favours, negative disfavours).",
+    )
+    omit: str | None = Field(
+        None,
+        description="Amino acids to forbid everywhere, as a letter string 'CDFG' or "
+        "'C,D,F,G'.",
+    )
+    tie: str | None = Field(
+        None,
+        description="Symmetry tie groups — residues forced to the same identity. "
+        "Groups separated by '|', members by ',', e.g. 'A1,B1|A5,B5'.",
+    )
+    tie_weights: str | None = Field(
+        None,
+        description="Optional per-member weights aligned to 'tie' (same '|'/',' layout). "
+        "Defaults to equal weights within each group.",
+    )
+    mask_ligand: bool = Field(
+        False,
+        description="Ablation toggle: if true, hide ligand atoms from the model "
+        "(design as if apo). Useful for A/B comparisons.",
+    )
+
     model_config = {
         "json_schema_extra": {
             "examples": [

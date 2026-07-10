@@ -82,7 +82,32 @@ def _confidence_figure(per_residue: list[float], title: str):
 # ── Tab 1: Design ───────────────────────────────────────────────────────────────
 
 
-def _design_fn(pdb_text: str, pdb_file, ligand: str, temperature: float, n_samples: int):
+def _clean(text: str | None) -> str | None:
+    """Trim a UI textbox to None when empty (so defaults apply)."""
+    if text is None:
+        return None
+    s = text.strip()
+    return s or None
+
+
+def _design_fn(
+    pdb_text: str,
+    pdb_file,
+    ligand: str,
+    temperature: float,
+    n_samples: int,
+    seed,
+    top_p: float,
+    decoding_order: str,
+    fix: str,
+    redesign: str,
+    design_chains: str,
+    bias: str,
+    omit: str,
+    tie: str,
+    tie_weights: str,
+    mask_ligand: bool,
+):
     pdb_str = ""
     if pdb_file is not None:
         try:
@@ -95,23 +120,38 @@ def _design_fn(pdb_text: str, pdb_file, ligand: str, temperature: float, n_sampl
     if not pdb_str:
         return "⚠️ Provide a PDB (paste text or upload a file).", None, ""
 
+    # Normalise the advanced controls to the adapter's expected types.
+    seed_val = int(seed) if seed not in (None, "") else None
+    top_p_val = float(top_p) if top_p and float(top_p) > 0.0 else None  # 0 slider = off
+    fix_v, redesign_v = _clean(fix), _clean(redesign)
+    chains_v, bias_v, omit_v = _clean(design_chains), _clean(bias), _clean(omit)
+    tie_v, tie_w_v = _clean(tie), _clean(tie_weights)
+
+    # Whether the user customised anything beyond the plain defaults. The bundled
+    # precomputed results were generated with NO constraints, so we may only serve
+    # them when no advanced knob is active — otherwise we'd return a stale answer.
+    advanced_active = any(
+        v is not None for v in (seed_val, top_p_val, fix_v, redesign_v, chains_v, bias_v, omit_v, tie_v)
+    ) or mask_ligand or decoding_order != "random"
+
     # If this exact PDB matches a bundled example with a precomputed result,
     # serve that instantly (keeps the demo snappy for larger ligand examples).
-    for path in _example_labels().values():
-        if path.read_text(encoding="utf-8").strip() == pdb_str:
-            pre = _precomputed_result(path)
-            if pre is not None:
-                fig = _confidence_figure(
-                    pre["per_residue_confidence"][0], f"{path.stem.upper()} (precomputed)"
-                )
-                seqs = "\n".join(f"> sample {i}\n{s}" for i, s in enumerate(pre["sequences"]))
-                meta = (
-                    f"**Precomputed** · {pre['n_residues']} residues · "
-                    f"mean confidence {pre['mean_confidence']:.3f} · "
-                    f"{pre['inference_ms']:.0f} ms (original run)"
-                )
-                return f"```\n{seqs}\n```", fig, meta
-            break
+    if not advanced_active:
+        for path in _example_labels().values():
+            if path.read_text(encoding="utf-8").strip() == pdb_str:
+                pre = _precomputed_result(path)
+                if pre is not None:
+                    fig = _confidence_figure(
+                        pre["per_residue_confidence"][0], f"{path.stem.upper()} (precomputed)"
+                    )
+                    seqs = "\n".join(f"> sample {i}\n{s}" for i, s in enumerate(pre["sequences"]))
+                    meta = (
+                        f"**Precomputed** · {pre['n_residues']} residues · "
+                        f"mean confidence {pre['mean_confidence']:.3f} · "
+                        f"{pre['inference_ms']:.0f} ms (original run)"
+                    )
+                    return f"```\n{seqs}\n```", fig, meta
+                break
 
     try:
         result = run_inference(
@@ -119,6 +159,17 @@ def _design_fn(pdb_text: str, pdb_file, ligand: str, temperature: float, n_sampl
             ligand=(ligand or None),
             temperature=float(temperature),
             n_samples=int(n_samples),
+            seed=seed_val,
+            top_p=top_p_val,
+            decoding_order=decoding_order,
+            fix=fix_v,
+            redesign=redesign_v,
+            design_chains=chains_v,
+            bias=bias_v,
+            omit=omit_v,
+            tie=tie_v,
+            tie_weights=tie_w_v,
+            mask_ligand=bool(mask_ligand),
         )
     except Exception as exc:  # noqa: BLE001 — surface errors to the UI cleanly
         return f"❌ {type(exc).__name__}: {exc}", None, ""
@@ -337,15 +388,32 @@ _API_DOC = f"""
 ```json
 {{
   "pdb": "<full PDB file contents as text>",
-  "ligand": null,
   "temperature": 0.1,
-  "n_samples": 1
+  "n_samples": 1,
+
+  "seed": null,
+  "top_p": null,
+  "decoding_order": "random",
+  "fix": null,
+  "redesign": null,
+  "design_chains": null,
+  "bias": null,
+  "omit": null,
+  "tie": null,
+  "tie_weights": null,
+  "mask_ligand": false
 }}
 ```
 Returns `sequences`, `per_residue_confidence`, `mean_confidence`, `n_residues`,
 `inference_ms`, and a `request_id`. Response headers include `X-Request-ID` and
 `X-Inference-MS`. Structures larger than **{DEFAULT_MAX_RESIDUES} residues** are
 rejected with `413` (this is a CPU demo).
+
+All fields after `n_samples` are **optional** and mirror the `uma-inverse design`
+CLI: constrain positions (`fix`, `redesign`, `design_chains`), steer composition
+(`bias` like `"W:3.0,A:-1.0"`, `omit` like `"CDFG"`), enforce symmetry (`tie`),
+control sampling (`seed`, `top_p`, `decoding_order`), or ablate the ligand
+(`mask_ligand`). Invalid selectors return `400` with a pointed message.
 
 ### curl
 ```bash
@@ -409,8 +477,67 @@ def build_ui() -> gr.Blocks:
                         placeholder="ATOM ... / HETATM ...",
                     )
                     ligand = gr.Textbox(label="Ligand (optional; read from PDB HETATM)", value="")
-                    temperature = gr.Slider(0.0, 2.0, value=0.1, step=0.05, label="temperature")
-                    n_samples = gr.Slider(1, 8, value=1, step=1, label="n_samples")
+                    temperature = gr.Slider(
+                        0.0, 2.0, value=0.1, step=0.05, label="temperature",
+                        info="0.0 = argmax (most likely residue); higher = more diverse.",
+                    )
+                    n_samples = gr.Slider(
+                        1, 8, value=1, step=1, label="n_samples",
+                        info="Independent sequences to design. Each adds a full CPU decode.",
+                    )
+
+                    with gr.Accordion("⚙️ Advanced options", open=False):
+                        gr.Markdown(
+                            "Optional controls that mirror the `uma-inverse design` CLI. "
+                            "Leave blank for defaults. Residue IDs are `<chain><number>` "
+                            "(e.g. `A23`), space- or comma-separated."
+                        )
+                        with gr.Row():
+                            seed = gr.Number(
+                                label="seed", value=None, precision=0,
+                                info="Reproducible sampling. Blank = random each run.",
+                            )
+                            top_p = gr.Slider(
+                                0.0, 1.0, value=0.0, step=0.05, label="top_p (nucleus)",
+                                info="0 = off. Restricts sampling to the top-p mass.",
+                            )
+                        decoding_order = gr.Radio(
+                            ["random", "left-to-right"], value="random", label="decoding order",
+                            info="'random' matches LigandMPNN; 'left-to-right' is deterministic with a seed.",
+                        )
+                        fix = gr.Textbox(
+                            label="fix — lock residues to native",
+                            placeholder="A23 A24 B10", value="",
+                        )
+                        redesign = gr.Textbox(
+                            label="redesign — ONLY these residues are designable",
+                            placeholder="A5 A6 A7", value="",
+                        )
+                        design_chains = gr.Textbox(
+                            label="design chains — restrict redesign to these chains",
+                            placeholder="A,B", value="",
+                        )
+                        bias = gr.Textbox(
+                            label="AA bias — favour/disfavour residues",
+                            placeholder="W:3.0,A:-1.0", value="",
+                        )
+                        omit = gr.Textbox(
+                            label="omit — forbid these amino acids everywhere",
+                            placeholder="CDFG", value="",
+                        )
+                        with gr.Row():
+                            tie = gr.Textbox(
+                                label="tie — symmetry groups",
+                                placeholder="A1,B1|A5,B5", value="",
+                            )
+                            tie_weights = gr.Textbox(
+                                label="tie weights (optional)",
+                                placeholder="0.5,0.5|0.5,0.5", value="",
+                            )
+                        mask_ligand = gr.Checkbox(
+                            label="mask ligand (design as if apo — ablation)", value=False,
+                        )
+
                     run_btn = gr.Button("Design sequence(s)", variant="primary")
                     if example_labels:
                         ex_dropdown = gr.Dropdown(
@@ -423,7 +550,11 @@ def build_ui() -> gr.Blocks:
 
             run_btn.click(
                 _design_fn,
-                inputs=[pdb_text, pdb_file, ligand, temperature, n_samples],
+                inputs=[
+                    pdb_text, pdb_file, ligand, temperature, n_samples,
+                    seed, top_p, decoding_order, fix, redesign, design_chains,
+                    bias, omit, tie, tie_weights, mask_ligand,
+                ],
                 outputs=[out_seq, out_plot, out_meta],
                 concurrency_limit=1,  # serialise inference on the CPU box
             )

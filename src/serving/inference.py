@@ -121,8 +121,31 @@ class InferenceEngine:
         temperature: float = 0.1,
         n_samples: int = 1,
         seed: int | None = None,
+        top_p: float | None = None,
+        decoding_order: str = "random",
+        fix: str | None = None,
+        redesign: str | None = None,
+        design_chains: str | None = None,
+        bias: str | None = None,
+        omit: str | None = None,
+        tie: str | None = None,
+        tie_weights: str | None = None,
+        mask_ligand: bool = False,
     ) -> InferenceResult:
         """Design ``n_samples`` sequences for one structure. See :func:`run_inference`."""
+        # Build constraints from the request selectors. Parse/validation errors
+        # (ConstraintError ⊂ ValueError) surface as 400s via the app's handler.
+        constraints = DesignConstraints.from_cli(
+            fix=fix,
+            redesign=redesign,
+            design_chains=design_chains,
+            bias=bias,
+            omit=omit,
+            tie=tie,
+            tie_weights=tie_weights,
+            mask_ligand=mask_ligand,
+        )
+
         # ``load_structure`` reads a file path, not a string, so persist the
         # posted PDB to a temp file for the duration of the call.
         tmp = tempfile.NamedTemporaryFile(  # noqa: SIM115 — managed in finally
@@ -137,11 +160,12 @@ class InferenceEngine:
             ctx = self.session.load_structure(
                 pdb_path=tmp.name,
                 max_total_nodes=max(self.max_residues * 4, 1024),
+                mask_ligand=mask_ligand,
             )
             if ctx.residue_count > self.max_residues:
                 raise InputTooLargeError(ctx.residue_count, self.max_residues)
 
-            resolved = DesignConstraints.from_cli().resolve(ctx)
+            resolved = constraints.resolve(ctx)
 
             start = time.perf_counter()
             samples = autoregressive_design(
@@ -150,7 +174,9 @@ class InferenceEngine:
                 constraints=resolved,
                 num_samples=n_samples,
                 temperature=temperature,
+                top_p=top_p,
                 seed=seed,
+                decoding_order=decoding_order,  # type: ignore[arg-type]
             )
             inference_ms = (time.perf_counter() - start) * 1000.0
 
@@ -324,6 +350,16 @@ def run_inference(
     temperature: float = 0.1,
     n_samples: int = 1,
     seed: int | None = None,
+    top_p: float | None = None,
+    decoding_order: str = "random",
+    fix: str | None = None,
+    redesign: str | None = None,
+    design_chains: str | None = None,
+    bias: str | None = None,
+    omit: str | None = None,
+    tie: str | None = None,
+    tie_weights: str | None = None,
+    mask_ligand: bool = False,
 ) -> InferenceResult:
     """Design sequences for a PDB structure on CPU.
 
@@ -333,16 +369,41 @@ def run_inference(
         temperature: Sampling temperature (0.0 = argmax).
         n_samples: Number of sequences to design.
         seed: Optional base RNG seed for reproducibility (sample ``i`` uses ``seed + i``).
+        top_p: Optional nucleus (top-p) sampling threshold.
+        decoding_order: ``"random"`` (default) or ``"left-to-right"``.
+        fix: Residue IDs to hold at their native identity (selector string).
+        redesign: If set, only these residue IDs are designable.
+        design_chains: Chain letters to restrict redesign to.
+        bias: Global AA logit bias, e.g. ``"W:3.0,A:-1.0"``.
+        omit: Amino acids to forbid everywhere, e.g. ``"CDFG"``.
+        tie: Symmetry tie groups (``"A1,B1|A5,B5"``).
+        tie_weights: Optional per-member weights aligned to ``tie``.
+        mask_ligand: If true, hide ligand atoms (design as if apo).
 
     Returns:
         An :class:`~src.serving.schemas.InferenceResult`.
 
     Raises:
         InputTooLargeError: If the structure exceeds the residue cap.
-        ValueError: If the PDB contains no parseable protein residues.
+        ValueError: If the PDB contains no parseable protein residues, or a
+            constraint selector is invalid (``ConstraintError``).
     """
     return get_engine().run(
-        pdb_str, ligand=ligand, temperature=temperature, n_samples=n_samples, seed=seed
+        pdb_str,
+        ligand=ligand,
+        temperature=temperature,
+        n_samples=n_samples,
+        seed=seed,
+        top_p=top_p,
+        decoding_order=decoding_order,
+        fix=fix,
+        redesign=redesign,
+        design_chains=design_chains,
+        bias=bias,
+        omit=omit,
+        tie=tie,
+        tie_weights=tie_weights,
+        mask_ligand=mask_ligand,
     )
 
 
