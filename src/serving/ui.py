@@ -63,39 +63,47 @@ def _load_example(label: str) -> str:
 
 # ── Fetch a structure from RCSB by PDB ID ────────────────────────────────────────
 
-RCSB_DOWNLOAD_URL = "https://files.rcsb.org/download/{pdb_id}.pdb"
+RCSB_DOWNLOAD_URL = "https://files.rcsb.org/download/{pdb_id}.{ext}"
 
 
 def _fetch_pdb(pdb_id: str) -> str:
-    """Download a PDB entry from RCSB and return its text (→ the PDB textbox).
+    """Download a structure from RCSB by ID and return its text (→ the textbox).
 
-    Raises a ``gr.Error`` (surfaced as a toast) on a bad ID, a missing entry, or
-    a network failure, so the user gets a clear message instead of a silent no-op.
+    Tries the legacy ``.pdb`` file first, then falls back to ``.cif`` — RCSB has
+    made PDB format secondary, so large or recent entries exist only as mmCIF
+    (which the parser now handles). Raises a ``gr.Error`` (a toast) on a bad ID,
+    a missing entry, or a network failure so the user gets a clear message.
     """
     pid = (pdb_id or "").strip().upper()
     if len(pid) != 4 or not pid.isalnum():
         raise gr.Error("Enter a 4-character PDB ID, e.g. 1CRN.")
 
-    try:
-        import httpx
+    import httpx
 
-        resp = httpx.get(
-            RCSB_DOWNLOAD_URL.format(pdb_id=pid), timeout=15.0, follow_redirects=True
-        )
-    except Exception as exc:  # noqa: BLE001 — network/DNS → clean toast
-        raise gr.Error(f"Could not reach RCSB: {exc}") from exc
+    last_status = None
+    for ext in ("pdb", "cif"):
+        try:
+            resp = httpx.get(
+                RCSB_DOWNLOAD_URL.format(pdb_id=pid, ext=ext),
+                timeout=15.0,
+                follow_redirects=True,
+            )
+        except Exception as exc:  # noqa: BLE001 — network/DNS → clean toast
+            raise gr.Error(f"Could not reach RCSB: {exc}") from exc
 
-    if resp.status_code == 404:
-        raise gr.Error(
-            f"PDB {pid} not found as a legacy .pdb file. Very large or recent "
-            "entries are mmCIF-only, which this demo can't parse — try another ID."
-        )
-    if resp.status_code != 200:
-        raise gr.Error(f"RCSB returned HTTP {resp.status_code} for {pid}.")
+        if resp.status_code == 200:
+            gr.Info(
+                f"Fetched {pid} from RCSB as .{ext} ({len(resp.text):,} bytes). "
+                "Now click Design/Score."
+            )
+            return resp.text
+        last_status = resp.status_code
+        if resp.status_code != 404:
+            break  # a non-404 error won't be fixed by trying the other format
 
-    text = resp.text
-    gr.Info(f"Fetched {pid} from RCSB ({len(text):,} bytes). Now click Design/Score.")
-    return text
+    if last_status == 404:
+        raise gr.Error(f"No entry {pid} found at RCSB (tried .pdb and .cif).")
+    raise gr.Error(f"RCSB returned HTTP {last_status} for {pid}.")
 
 
 # ── Plotting ────────────────────────────────────────────────────────────────────
@@ -504,8 +512,8 @@ def build_ui() -> gr.Blocks:
                 with gr.Column():
                     gr.Markdown("**Provide a structure** — upload a file, paste text, or load an example.")
                     pdb_file = gr.File(
-                        label="📁 Select a .pdb file",
-                        file_types=[".pdb"],
+                        label="📁 Select a .pdb or .cif file",
+                        file_types=[".pdb", ".cif", ".mmcif"],
                         file_count="single",
                     )
                     with gr.Row():
@@ -616,7 +624,9 @@ def build_ui() -> gr.Blocks:
                         "likelihood + candidate mutations (positions the model would change)."
                     )
                     s_pdb_file = gr.File(
-                        label="📁 Select a .pdb file", file_types=[".pdb"], file_count="single"
+                        label="📁 Select a .pdb or .cif file",
+                        file_types=[".pdb", ".cif", ".mmcif"],
+                        file_count="single",
                     )
                     with gr.Row():
                         s_pdb_id = gr.Textbox(

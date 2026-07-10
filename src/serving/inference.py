@@ -49,6 +49,19 @@ logger = logging.getLogger(__name__)
 DEFAULT_MAX_RESIDUES = int(os.environ.get("UMA_MAX_RESIDUES", "600"))
 
 
+def _structure_suffix(text: str) -> str:
+    """Guess ``.cif`` vs ``.pdb`` from posted structure text.
+
+    The parser dispatches on file extension, so a posted CIF must be written to a
+    ``.cif`` temp file. mmCIF puts every atom under the ``_atom_site.`` category
+    and typically opens with a ``data_`` block — neither token ever appears in a
+    legacy PDB file, so their presence is a reliable discriminator.
+    """
+    if "_atom_site." in text or text.lstrip()[:5].lower() == "data_":
+        return ".cif"
+    return ".pdb"
+
+
 def _project_root() -> Path:
     """Repo root, derived from this file's location (``src/serving/inference.py``)."""
     return Path(__file__).resolve().parents[2]
@@ -149,7 +162,7 @@ class InferenceEngine:
         # ``load_structure`` reads a file path, not a string, so persist the
         # posted PDB to a temp file for the duration of the call.
         tmp = tempfile.NamedTemporaryFile(  # noqa: SIM115 — managed in finally
-            mode="w", suffix=".pdb", delete=False, encoding="utf-8"
+            mode="w", suffix=_structure_suffix(pdb_str), delete=False, encoding="utf-8"
         )
         try:
             tmp.write(pdb_str)
@@ -221,7 +234,7 @@ class InferenceEngine:
     ) -> ScoreResult:
         """Score a structure's sequence under the model. See :func:`score_inference`."""
         tmp = tempfile.NamedTemporaryFile(  # noqa: SIM115 — managed in finally
-            mode="w", suffix=".pdb", delete=False, encoding="utf-8"
+            mode="w", suffix=_structure_suffix(pdb_str), delete=False, encoding="utf-8"
         )
         try:
             tmp.write(pdb_str)

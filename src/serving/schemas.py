@@ -27,8 +27,9 @@ class DesignRequest(BaseModel):
         ...,
         min_length=1,
         max_length=MAX_PDB_CHARS,
-        description="Full PDB file contents as text. Ligand atoms are read "
-        "from the structure's HETATM records.",
+        description="Full structure file contents as text — legacy PDB or mmCIF "
+        "(.cif); the format is auto-detected. Ligand atoms are read from the "
+        "structure's HETATM / _atom_site records.",
     )
     ligand: str | None = Field(
         None,
@@ -152,7 +153,8 @@ class ScoreRequest(BaseModel):
         ...,
         min_length=1,
         max_length=MAX_PDB_CHARS,
-        description="Full PDB file contents as text. Ligand atoms are read from HETATM records.",
+        description="Full structure file contents as text — legacy PDB or mmCIF "
+        "(.cif), format auto-detected. Ligand atoms are read from HETATM / _atom_site records.",
     )
     sequence: str | None = Field(
         None,

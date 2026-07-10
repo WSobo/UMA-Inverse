@@ -91,7 +91,8 @@ def parse_pdb(
     """Parse a PDB file into tensors compatible with ``load_example_from_pdb``.
 
     Args:
-        pdb_path: Path to a ``.pdb`` file.
+        pdb_path: Path to a structure file. ``.cif``/``.mmcif`` is parsed as
+            mmCIF; any other extension is parsed as legacy PDB.
         cutoff_for_score: Ligand atoms within this Å distance of any Cα are
             marked valid in ``Y_m``.  Distant atoms (crystal contacts, symmetry
             mates) are excluded.  Falls back to all atoms when no protein Cα
@@ -136,6 +137,7 @@ def parse_pdb(
         FileNotFoundError: If *pdb_path* does not exist.
     """
     try:
+        from Bio.PDB import MMCIFParser as _CIFParser
         from Bio.PDB import PDBParser as _BPParser
     except ImportError as exc:
         raise ImportError(
@@ -143,9 +145,16 @@ def parse_pdb(
         ) from exc
 
     if not __import__("os").path.exists(pdb_path):
-        raise FileNotFoundError(f"PDB file not found: {pdb_path}")
+        raise FileNotFoundError(f"structure file not found: {pdb_path}")
 
-    bp_parser = _BPParser(QUIET=True)
+    # Dispatch on extension. Both parsers yield BioPython's identical
+    # Structure→Model→Chain→Residue→Atom object model, so every line below this
+    # is format-agnostic. (RCSB has made the legacy .pdb format secondary; large
+    # and recent entries are mmCIF-only.)
+    if str(pdb_path).lower().endswith((".cif", ".mmcif")):
+        bp_parser = _CIFParser(QUIET=True)
+    else:
+        bp_parser = _BPParser(QUIET=True)
     structure = bp_parser.get_structure("s", pdb_path)
     model = next(iter(structure))  # first MODEL record
 
