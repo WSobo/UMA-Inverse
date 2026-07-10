@@ -61,6 +61,43 @@ def _load_example(label: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
+# ── Fetch a structure from RCSB by PDB ID ────────────────────────────────────────
+
+RCSB_DOWNLOAD_URL = "https://files.rcsb.org/download/{pdb_id}.pdb"
+
+
+def _fetch_pdb(pdb_id: str) -> str:
+    """Download a PDB entry from RCSB and return its text (→ the PDB textbox).
+
+    Raises a ``gr.Error`` (surfaced as a toast) on a bad ID, a missing entry, or
+    a network failure, so the user gets a clear message instead of a silent no-op.
+    """
+    pid = (pdb_id or "").strip().upper()
+    if len(pid) != 4 or not pid.isalnum():
+        raise gr.Error("Enter a 4-character PDB ID, e.g. 1CRN.")
+
+    try:
+        import httpx
+
+        resp = httpx.get(
+            RCSB_DOWNLOAD_URL.format(pdb_id=pid), timeout=15.0, follow_redirects=True
+        )
+    except Exception as exc:  # noqa: BLE001 — network/DNS → clean toast
+        raise gr.Error(f"Could not reach RCSB: {exc}") from exc
+
+    if resp.status_code == 404:
+        raise gr.Error(
+            f"PDB {pid} not found as a legacy .pdb file. Very large or recent "
+            "entries are mmCIF-only, which this demo can't parse — try another ID."
+        )
+    if resp.status_code != 200:
+        raise gr.Error(f"RCSB returned HTTP {resp.status_code} for {pid}.")
+
+    text = resp.text
+    gr.Info(f"Fetched {pid} from RCSB ({len(text):,} bytes). Now click Design/Score.")
+    return text
+
+
 # ── Plotting ────────────────────────────────────────────────────────────────────
 
 
@@ -471,6 +508,14 @@ def build_ui() -> gr.Blocks:
                         file_types=[".pdb"],
                         file_count="single",
                     )
+                    with gr.Row():
+                        pdb_id = gr.Textbox(
+                            label="…or fetch by PDB ID",
+                            placeholder="e.g. 1CRN",
+                            scale=3,
+                            max_lines=1,
+                        )
+                        fetch_btn = gr.Button("⬇ Fetch from RCSB", scale=1)
                     pdb_text = gr.Textbox(
                         label="…or paste PDB text",
                         lines=6,
@@ -558,6 +603,8 @@ def build_ui() -> gr.Blocks:
                 outputs=[out_seq, out_plot, out_meta],
                 concurrency_limit=1,  # serialise inference on the CPU box
             )
+            fetch_btn.click(_fetch_pdb, inputs=[pdb_id], outputs=[pdb_text])
+            pdb_id.submit(_fetch_pdb, inputs=[pdb_id], outputs=[pdb_text])
             if example_labels:
                 ex_dropdown.change(_load_example, inputs=[ex_dropdown], outputs=[pdb_text])
 
@@ -571,6 +618,14 @@ def build_ui() -> gr.Blocks:
                     s_pdb_file = gr.File(
                         label="📁 Select a .pdb file", file_types=[".pdb"], file_count="single"
                     )
+                    with gr.Row():
+                        s_pdb_id = gr.Textbox(
+                            label="…or fetch by PDB ID",
+                            placeholder="e.g. 1CRN",
+                            scale=3,
+                            max_lines=1,
+                        )
+                        s_fetch_btn = gr.Button("⬇ Fetch from RCSB", scale=1)
                     s_pdb_text = gr.Textbox(label="…or paste PDB text", lines=6)
                     s_sequence = gr.Textbox(
                         label="Sequence to score (optional; defaults to the native sequence)",
@@ -596,6 +651,8 @@ def build_ui() -> gr.Blocks:
                 outputs=[s_summary, s_plot, s_table],
                 concurrency_limit=1,
             )
+            s_fetch_btn.click(_fetch_pdb, inputs=[s_pdb_id], outputs=[s_pdb_text])
+            s_pdb_id.submit(_fetch_pdb, inputs=[s_pdb_id], outputs=[s_pdb_text])
             if example_labels:
                 s_ex.change(_load_example, inputs=[s_ex], outputs=[s_pdb_text])
 
